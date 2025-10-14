@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMRS Query Interface - RAG Management</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .section h2 {
+            color: #3498db;
+            margin-top: 0;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+        }
+
+        .metadata-fields {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .metadata-field {
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .knowledge-list {
+            margin-top: 20px;
+        }
+
+        .knowledge-item {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .knowledge-text {
+            margin-bottom: 10px;
+        }
+
+        .metadata-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .metadata-tag {
+            background: #3498db;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+
+        .tab-container {
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border: none;
+            cursor: pointer;
+        }
+
+        .tab.active {
+            background: #3498db;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Database Knowledge Management</h1>
+
+        <div class="tab-container">
+            <button class="tab active" onclick="switchTab('add')">Add Knowledge</button>
+            <button class="tab" onclick="switchTab('view')">View Knowledge</button>
+        </div>
+
+        <div id="add-tab" class="tab-content active">
+            <!-- Schema Knowledge Section -->
+            <div class="section">
+                <h2>Add Schema Knowledge</h2>
+                <div class="form-group">
+                    <label for="schema-text">Description:</label>
+                    <textarea id="schema-text" placeholder="Describe a table, column, or relationship in the database. Example: The obs table stores all patient observations including vital signs, lab results, and answers to questions."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Metadata:</label>
+                    <div class="metadata-fields">
+                        <div class="metadata-field">
+                            <label for="schema-table">Table Name:</label>
+                            <input type="text" id="schema-table">
+                        </div>
+                        <div class="metadata-field">
+                            <label for="schema-column">Column Name:</label>
+                            <input type="text" id="schema-column">
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="addSchemaKnowledge()">Add Schema Knowledge</button>
+            </div>
+
+            <!-- Business Rules Section -->
+            <div class="section">
+                <h2>Add Business Rules</h2>
+                <div class="form-group">
+                    <label for="rule-text">Rule Description:</label>
+                    <textarea id="rule-text" placeholder="Describe a business rule or data relationship. Example: Active patients must have a non-voided person record and at least one non-voided encounter."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Metadata:</label>
+                    <div class="metadata-fields">
+                        <div class="metadata-field">
+                            <label for="rule-category">Category:</label>
+                            <input type="text" id="rule-category">
+                        </div>
+                        <div class="metadata-field">
+                            <label for="rule-priority">Priority:</label>
+                            <select id="rule-priority">
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="addBusinessRule()">Add Business Rule</button>
+            </div>
+        </div>
+
+        <div id="view-tab" class="tab-content">
+            <!-- View Knowledge Section -->
+            <div class="section">
+                <h2>Schema Knowledge</h2>
+                <div id="schema-knowledge" class="knowledge-list">
+                    <!-- Schema knowledge items will be inserted here -->
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Business Rules</h2>
+                <div id="business-rules" class="knowledge-list">
+                    <!-- Business rules will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load all knowledge when page loads
+        document.addEventListener('DOMContentLoaded', loadKnowledge);
+
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.textContent.toLowerCase().includes(tabName)) {
+                    tab.classList.add('active');
+                }
+            });
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+
+            if (tabName === 'view') {
+                loadKnowledge();
+            }
+        }
+
+        function loadKnowledge() {
+            fetch('/api/rag/knowledge')
+                .then(response => response.json())
+                .then(knowledge => {
+                    // Update schema knowledge display
+                    const schemaList = document.getElementById('schema-knowledge');
+                    schemaList.innerHTML = knowledge.schema
+                        .map(item => createKnowledgeItem(item, 'schema'))
+                        .join('');
+
+                    // Update business rules display
+                    const rulesList = document.getElementById('business-rules');
+                    rulesList.innerHTML = knowledge.business_rules
+                        .map(item => createKnowledgeItem(item, 'rule'))
+                        .join('');
+                });
+        }
+
+        function createKnowledgeItem(item, type) {
+            const metadata = item.metadata || {};
+            const metadataTags = Object.entries(metadata)
+                .map(([key, value]) => `<span class="metadata-tag">${key}: ${value}</span>`)
+                .join('');
+
+            return `
+                <div class="knowledge-item">
+                    <div class="knowledge-text">${item.text}</div>
+                    <div class="metadata-tags">${metadataTags}</div>
+                </div>
+            `;
+        }
+
+        function addSchemaKnowledge() {
+            const text = document.getElementById('schema-text').value;
+            const table = document.getElementById('schema-table').value;
+            const column = document.getElementById('schema-column').value;
+
+            if (!text) {
+                alert('Please enter a description');
+                return;
+            }
+
+            const metadata = {};
+            if (table) metadata.table = table;
+            if (column) metadata.column = column;
+
+            fetch('/api/rag/schema', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    descriptions: [{
+                        text: text,
+                        metadata: metadata
+                    }]
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    document.getElementById('schema-text').value = '';
+                    document.getElementById('schema-table').value = '';
+                    document.getElementById('schema-column').value = '';
+                    alert('Schema knowledge added successfully!');
+                } else {
+                    alert('Error adding schema knowledge');
+                }
+            });
+        }
+
+        function addBusinessRule() {
+            const text = document.getElementById('rule-text').value;
+            const category = document.getElementById('rule-category').value;
+            const priority = document.getElementById('rule-priority').value;
+
+            if (!text) {
+                alert('Please enter a rule description');
+                return;
+            }
+
+            const metadata = {};
+            if (category) metadata.category = category;
+            if (priority) metadata.priority = priority;
+
+            fetch('/api/rag/business-rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    descriptions: [{
+                        text: text,
+                        metadata: metadata
+                    }]
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    document.getElementById('rule-text').value = '';
+                    document.getElementById('rule-category').value = '';
+                    document.getElementById('rule-priority').value = 'medium';
+                    alert('Business rule added successfully!');
+                } else {
+                    alert('Error adding business rule');
+                }
+            });
+        }
+    </script>
+</body>
+</html>

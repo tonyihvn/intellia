@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP OpenMRS Application</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            display: flex;
+        }
+
+        /* Sidebar Styles */
+        .sidebar {
+            width: 300px;
+            height: 100vh;
+            background: #fff;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            position: fixed;
+            left: 0;
+        }
+
+        .sidebar h3 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .history-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .history-item:hover {
+            background: #e9ecef;
+        }
+
+        .delete-btn {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #dc3545;
+            cursor: pointer;
+        }
+
+        /* Main Content Styles */
+        .main-content {
+            margin-left: 320px;
+            padding: 20px;
+            flex-grow: 1;
+        }
+
+        header {
+            background: #007bff;
+            color: #fff;
+            padding: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .query-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            resize: vertical;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .generate-btn {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .execute-btn {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .generate-btn:hover, .execute-btn:hover {
+            opacity: 0.9;
+        }
+
+        .sql-display {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        .response-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .visualization-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .visualization-controls select {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        .explanation-text {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 5px;
+            color: #495057;
+            line-height: 1.6;
+        }
+
+        #chart-container {
+            width: 100%;
+            margin-top: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #007bff;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <!-- Include Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h3>Question History</h3>
+        <div id="history-list">
+            <!-- History items will be added here dynamically -->
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <header>
+            <h1>OpenMRS Query Interface</h1>
+            <div class="header-controls">
+                <a href="/db-config" class="btn config-btn" title="Configure Database">
+                    <i class="fas fa-cog"></i> Database Settings
+                </a>
+            </div>
+        </header>
+
+        <div class="container">
+            <textarea id="question" class="query-input" rows="3" 
+                placeholder="Enter your question about OpenMRS data..."></textarea>
+            
+            <div class="button-group">
+                <button onclick="generateQuery()" class="btn generate-btn">
+                    Generate SQL Query
+                </button>
+                <button onclick="executeQuery()" class="btn execute-btn">
+                    Execute Query
+                </button>
+            </div>
+
+            <div id="sql-display" class="sql-display" style="display: none;">
+                <h3>Generated SQL Query: <small>(edit if needed)</small></h3>
+                <textarea id="sql-query" class="query-input" style="font-family: monospace;" rows="4"></textarea>
+                <div class="button-group" style="justify-content: flex-end;">
+                    <button onclick="executeEditedQuery()" class="btn execute-btn">
+                        Run Modified Query
+                    </button>
+                </div>
+            </div>
+
+            <div id="response" class="response" style="display: none;">
+                <div class="response-header">
+                    <h3>Query Results:</h3>
+                    <div class="visualization-controls">
+                        <label for="viz-type">View as:</label>
+                        <select id="viz-type" onchange="changeVisualization()">
+                            <option value="table">Table</option>
+                            <option value="chart">Chart</option>
+                            <option value="text">Plain Text</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="result-content"></div>
+                <div id="chart-container" style="display: none; height: 400px;"></div>
+                <div id="explanation" class="explanation-text"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentQuery = '';
+        let currentQuestion = '';
+        
+        // Load query history when page loads
+        window.addEventListener('DOMContentLoaded', (event) => {
+            loadQueryHistory();
+        });
+        
+        async function loadQueryHistory() {
+            try {
+                const response = await fetch('/api/history');
+                const history = await response.json();
+                
+                const historyList = document.getElementById('history-list');
+                historyList.innerHTML = ''; // Clear existing history
+                
+                history.forEach(item => {
+                    const historyItem = document.createElement('div');
+                    historyItem.className = 'history-item';
+                    historyItem.innerHTML = `
+                        ${item.question}
+                        <span class="delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(this);">
+                            <i class="fas fa-times"></i>
+                        </span>
+                    `;
+                    historyItem.onclick = () => rerunQuery(item.question);
+                    historyList.appendChild(historyItem);
+                });
+            } catch (error) {
+                console.error('Error loading history:', error);
+            }
+        }
+        
+        async function generateQuery() {
+            const question = document.getElementById('question').value.trim();
+            if (!question) return;
+            
+            try {
+                // Show loading state
+                document.getElementById('sql-display').style.display = 'block';
+                document.getElementById('sql-query').value = 'Generating SQL...';
+                
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        question: question,
+                        action: 'generate'
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                currentQuery = data.sql;
+                currentQuestion = question;
+                
+                // Display the SQL
+                document.getElementById('sql-query').value = data.sql;
+                
+                // Add to history
+                addToHistory(question);
+                
+                // Auto-execute the query
+                executeQuery();
+                
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function executeQuery() {
+            if (!currentQuery) {
+                alert('Please generate a SQL query first.');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        question: currentQuestion,
+                        action: 'execute',
+                        sql: currentQuery
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Display the results
+                document.getElementById('result-content').innerHTML = formatResults(data.result);
+                document.getElementById('response').style.display = 'block';
+                
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        function formatResults(results) {
+            if (!Array.isArray(results)) {
+                return '<pre>' + JSON.stringify(results, null, 2) + '</pre>';
+            }
+            
+            if (results.length === 0) {
+                return '<p>No results found.</p>';
+            }
+
+            // Store results globally for visualization
+            window.currentResults = results;
+            
+            let html = '<table border="1" style="width:100%; border-collapse: collapse;">';
+            
+            // Headers
+            html += '<tr>';
+            for (let key of Object.keys(results[0])) {
+                html += `<th style="padding: 8px; text-align: left;">${key}</th>`;
+            }
+            html += '</tr>';
+            
+            // Data
+            for (let row of results) {
+                html += '<tr>';
+                for (let value of Object.values(row)) {
+                    html += `<td style="padding: 8px;">${value || 'N/A'}</td>`;
+                }
+                html += '</tr>';
+            }
+            
+            html += '</table>';
+
+            // Generate natural language explanation
+            const explanation = generateExplanation(results);
+            document.getElementById('explanation').innerHTML = explanation;
+
+            return html;
+        }
+
+        function generateExplanation(results) {
+            if (!results || results.length === 0) return '';
+            
+            const count = results.length;
+            const fields = Object.keys(results[0]);
+            
+            let explanation = `<p>The query returned ${count} result${count !== 1 ? 's' : ''}. `;
+            
+            if (count > 0) {
+                // Add summary of numeric fields
+                const numericFields = fields.filter(field => 
+                    typeof results[0][field] === 'number');
+                
+                numericFields.forEach(field => {
+                    const values = results.map(r => r[field]).filter(v => v != null);
+                    if (values.length > 0) {
+                        const avg = values.reduce((a, b) => a + b) / values.length;
+                        const max = Math.max(...values);
+                        explanation += `<br>The average ${field.replace(/_/g, ' ')} is ${avg.toFixed(2)}, `;
+                        explanation += `with the highest being ${max}.`;
+                    }
+                });
+            }
+            
+            explanation += '</p>';
+            return explanation;
+        }
+
+        function changeVisualization() {
+            const vizType = document.getElementById('viz-type').value;
+            const results = window.currentResults;
+            
+            document.getElementById('result-content').style.display = 
+                vizType === 'table' ? 'block' : 'none';
+            document.getElementById('chart-container').style.display = 
+                vizType === 'chart' ? 'block' : 'none';
+            
+            if (vizType === 'chart' && results && results.length > 0) {
+                createChart(results);
+            }
+        }
+
+        function createChart(data) {
+            const container = document.getElementById('chart-container');
+            container.innerHTML = '<canvas id="resultChart"></canvas>';
+            
+            const firstRow = data[0];
+            const numericFields = Object.keys(firstRow).filter(
+                key => typeof firstRow[key] === 'number'
+            );
+            
+            if (numericFields.length === 0) {
+                container.innerHTML = '<p>No numeric data available for charting.</p>';
+                return;
+            }
+            
+            const ctx = document.getElementById('resultChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map((_, index) => `Row ${index + 1}`),
+                    datasets: numericFields.map(field => ({
+                        label: field,
+                        data: data.map(row => row[field]),
+                        backgroundColor: getRandomColor()
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        function executeEditedQuery() {
+            currentQuery = document.getElementById('sql-query').value.trim();
+            executeQuery();
+        }
+        
+        function addToHistory(question) {
+            const historyList = document.getElementById('history-list');
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            historyItem.innerHTML = `
+                ${question}
+                <span class="delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(this);">
+                    <i class="fas fa-times"></i>
+                </span>
+            `;
+            historyItem.onclick = () => rerunQuery(question);
+            historyList.insertBefore(historyItem, historyList.firstChild);
+        }
+        
+        function deleteHistoryItem(element) {
+            element.parentElement.remove();
+        }
+        
+        function rerunQuery(question) {
+            document.getElementById('question').value = question;
+            generateQuery();
+        }
+    </script>
+</body>
+</html>

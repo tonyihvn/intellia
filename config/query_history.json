@@ -1,0 +1,32 @@
+[
+    {
+        "question": "What is the best way to treat patients judging from the weight record of clients in the openmrs databse",
+        "sql": "-- The question is ambiguous and open to interpretation.\n-- Assuming \"best way to treat\" refers to identifying potential factors\n-- influencing patient weight and analyzing the trends.\n-- Returning a query that joins patient information with observation data related to weight.\n-- This allows for further analysis using statistical tools or reporting engines.\n-- Note: This query might need adjustments based on specific data and analytical goals.\n\nSELECT\n    p.patient_id,\n    pn.given_name,\n    pn.family_name,\n    pa.address1,\n    pa.city_village,\n    per.gender,\n    per.birthdate,\n    o.obs_datetime AS weight_recorded_date,\n    o.value_numeric AS weight_in_kg -- Assuming weight is stored as a numeric value in kilograms. Change 'value_numeric' if different and adjust the unit.\nFROM\n    patient p\nJOIN\n    person per ON p.patient_id = per.person_id\nLEFT JOIN\n    person_name pn ON per.person_id = pn.person_id AND pn.preferred = 1\nLEFT JOIN\n    person_address pa ON per.person_id = pa.person_id AND pa.preferred = 1\nJOIN\n    obs o ON p.patient_id = o.person_id\nJOIN\n    concept c ON o.concept_id = c.concept_id\nWHERE\n    c.name LIKE '%Weight%' -- Assuming weight is stored using a concept whose name contains \"Weight\". Change criteria as needed.\nORDER BY\n    p.patient_id, o.obs_datetime;",
+        "timestamp": "2025-10-14T18:51:19.105077"
+    },
+    {
+        "question": "Get the last patient who took drug from this database. We don't use drug or drug_order everything from html forms are saved in the visit, encounter, and obs table",
+        "sql": "SELECT DISTINCT\n  p.patient_id\nFROM patient AS p\nINNER JOIN visit AS v\n  ON p.patient_id = v.patient_id\nINNER JOIN encounter AS e\n  ON v.visit_id = e.visit_id\nINNER JOIN obs AS o\n  ON e.encounter_id = o.encounter_id\nWHERE\n  o.concept_id IN (SELECT concept_id FROM concept WHERE class_id IN (SELECT concept_class_id FROM concept_class WHERE NAME = 'Drug'))\nORDER BY\n  e.encounter_datetime DESC\nLIMIT 1;",
+        "timestamp": "2025-10-14T18:50:02.992219"
+    },
+    {
+        "question": "Get the last patient who took drug from this database. We don't use drug or drug_order everything from html forms are saved in the visit, encounter, and obs table",
+        "sql": "SELECT DISTINCT\n  p.patient_id\nFROM patient AS p\nINNER JOIN encounter AS e\n  ON p.patient_id = e.patient_id\nINNER JOIN obs AS o\n  ON e.encounter_id = o.encounter_id\nINNER JOIN concept AS c\n  ON o.concept_id = c.concept_id\nWHERE\n  c.concept_id IN (SELECT DISTINCT\n      concept_id\n    FROM drug)\nORDER BY\n  e.encounter_datetime DESC\nLIMIT 1;",
+        "timestamp": "2025-10-14T18:50:02.320322"
+    },
+    {
+        "question": "Get the last patient who took drug from this database. We don't use drug or drug_order everything from html forms are saved in the visit, encounter, and obs table",
+        "sql": "SELECT DISTINCT\n  p.patient_id\nFROM patient AS p\nINNER JOIN encounter AS e\n  ON p.patient_id = e.patient_id\nINNER JOIN obs AS o\n  ON e.encounter_id = o.encounter_id\nINNER JOIN concept AS c\n  ON o.concept_id = c.concept_id\nWHERE\n  c.concept_id IN (SELECT concept_id FROM drug)\nORDER BY\n  e.encounter_datetime DESC\nLIMIT 1;",
+        "timestamp": "2025-10-14T18:49:58.633504"
+    },
+    {
+        "question": "Get the last patient who took drug from this database. We don't use drug or drug_order everything from html forms are saved in the visit, encounter, and obs table",
+        "sql": "SELECT\n  p.patient_id\nFROM patient AS p\nJOIN visit AS v\n  ON p.patient_id = v.patient_id\nJOIN encounter AS e\n  ON v.visit_id = e.visit_id\nJOIN obs AS o\n  ON e.encounter_id = o.encounter_id\nJOIN concept AS c\n  ON o.concept_id = c.concept_id\nWHERE\n  c.concept_id IN (\n    SELECT DISTINCT\n      concept_id\n    FROM drug\n  )\nORDER BY\n  e.encounter_datetime DESC\nLIMIT 1;",
+        "timestamp": "2025-10-14T18:46:42.427226"
+    },
+    {
+        "question": "Get the last patient who took drug from this database",
+        "sql": "```sql\nSELECT DISTINCT\n  p.patient_id\nFROM patient AS p\nINNER JOIN orders AS o\n  ON p.patient_id = o.patient_id\nINNER JOIN drug_order AS do\n  ON o.order_id = do.order_id\nORDER BY\n  o.date_created DESC\nLIMIT 1;\n```",
+        "timestamp": "2025-10-14T18:42:32.182098"
+    }
+]

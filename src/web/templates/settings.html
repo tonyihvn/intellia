@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMRS Query Interface - Settings</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* ... (include styles from index.html) ... */
+        .settings-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+        }
+
+        .section h2 {
+            margin-top: 0;
+            color: #007bff;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+
+        .guider-item, .source-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-add {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-remove {
+            background: #dc3545;
+            color: white;
+            padding: 5px 10px;
+        }
+
+        .visualization-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .viz-option {
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .viz-option.active {
+            background: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="settings-container">
+        <h1>Settings</h1>
+
+        <!-- Guiders Section -->
+        <div class="section" id="guiders-section">
+            <h2>Guiders / Training Data</h2>
+            <div class="form-group">
+                <label for="new-guider">Add New Guider:</label>
+                <textarea id="new-guider" class="form-control" rows="3" 
+                    placeholder="Enter information to help the AI understand the data structure or business rules..."></textarea>
+            </div>
+            <button onclick="addGuider()" class="btn btn-add">Add Guider</button>
+            <div id="guiders-list">
+                <!-- Guiders will be listed here -->
+            </div>
+        </div>
+
+        <!-- Context Sources Section -->
+        <div class="section" id="sources-section">
+            <h2>External Context Sources</h2>
+            <div class="form-group">
+                <label for="new-source-url">Add URL Source:</label>
+                <input type="url" id="new-source-url" class="form-control" 
+                    placeholder="Enter URL to documentation or reference...">
+            </div>
+            <div class="form-group">
+                <label for="source-file">Upload Document:</label>
+                <input type="file" id="source-file" class="form-control">
+            </div>
+            <button onclick="addSource()" class="btn btn-add">Add Source</button>
+            <div id="sources-list">
+                <!-- Sources will be listed here -->
+            </div>
+        </div>
+
+        <!-- Visualization Preferences -->
+        <div class="section" id="visualization-section">
+            <h2>Visualization Preferences</h2>
+            <div class="form-group">
+                <label>Preferred Chart Types:</label>
+                <div class="visualization-options" id="chart-options">
+                    <!-- Chart options will be added here -->
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Default Output Format:</label>
+                <select id="default-format" class="form-control">
+                    <option value="html">Interactive HTML</option>
+                    <option value="pdf">PDF Document</option>
+                    <option value="xlsx">Excel Spreadsheet</option>
+                    <option value="png">PNG Image</option>
+                </select>
+            </div>
+        </div>
+
+        <button onclick="saveSettings()" class="btn btn-primary">Save All Settings</button>
+    </div>
+
+    <script>
+        // Load current settings when page loads
+        document.addEventListener('DOMContentLoaded', loadSettings);
+
+        function loadSettings() {
+            // Load guiders
+            fetch('/api/settings/guiders')
+                .then(response => response.json())
+                .then(guiders => {
+                    const guidersList = document.getElementById('guiders-list');
+                    guidersList.innerHTML = '';
+                    guiders.forEach(guider => {
+                        addGuiderToList(guider);
+                    });
+                });
+
+            // Load context sources
+            fetch('/api/settings/sources')
+                .then(response => response.json())
+                .then(sources => {
+                    const sourcesList = document.getElementById('sources-list');
+                    sourcesList.innerHTML = '';
+                    sources.forEach(source => {
+                        addSourceToList(source);
+                    });
+                });
+
+            // Load visualization preferences
+            fetch('/api/settings/visualization')
+                .then(response => response.json())
+                .then(config => {
+                    document.getElementById('default-format').value = config.default_format;
+                    setupChartOptions(config.preferred_charts);
+                });
+        }
+
+        function addGuider() {
+            const guiderText = document.getElementById('new-guider').value.trim();
+            if (!guiderText) return;
+
+            fetch('/api/settings/guiders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ guider: guiderText })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    addGuiderToList(guiderText);
+                    document.getElementById('new-guider').value = '';
+                }
+            });
+        }
+
+        function addSource() {
+            const sourceUrl = document.getElementById('new-source-url').value.trim();
+            const sourceFile = document.getElementById('source-file').files[0];
+
+            const formData = new FormData();
+            if (sourceUrl) formData.append('url', sourceUrl);
+            if (sourceFile) formData.append('file', sourceFile);
+
+            fetch('/api/settings/sources', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    addSourceToList(result.source);
+                    document.getElementById('new-source-url').value = '';
+                    document.getElementById('source-file').value = '';
+                }
+            });
+        }
+
+        function addGuiderToList(guider) {
+            const guidersList = document.getElementById('guiders-list');
+            const div = document.createElement('div');
+            div.className = 'guider-item';
+            div.innerHTML = `
+                ${guider}
+                <button onclick="removeGuider(this)" class="btn btn-remove">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            guidersList.appendChild(div);
+        }
+
+        function addSourceToList(source) {
+            const sourcesList = document.getElementById('sources-list');
+            const div = document.createElement('div');
+            div.className = 'source-item';
+            div.innerHTML = `
+                ${source.url || source.filename}
+                <button onclick="removeSource(this)" class="btn btn-remove">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            sourcesList.appendChild(div);
+        }
+
+        function setupChartOptions(preferred) {
+            const chartTypes = [
+                'bar', 'line', 'pie', 'scatter', 'heatmap',
+                'timeline', 'comparison', 'distribution'
+            ];
+
+            const container = document.getElementById('chart-options');
+            container.innerHTML = chartTypes.map(type => `
+                <div class="viz-option ${preferred.includes(type) ? 'active' : ''}"
+                     onclick="toggleChartOption(this)"
+                     data-type="${type}">
+                    ${type.charAt(0).toUpperCase() + type.slice(1)}
+                </div>
+            `).join('');
+        }
+
+        function toggleChartOption(element) {
+            element.classList.toggle('active');
+        }
+
+        function saveSettings() {
+            // Collect all settings
+            const settings = {
+                visualization: {
+                    preferred_charts: Array.from(document.querySelectorAll('.viz-option.active'))
+                        .map(el => el.dataset.type),
+                    default_format: document.getElementById('default-format').value
+                }
+            };
+
+            // Save visualization preferences
+            fetch('/api/settings/visualization', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings.visualization)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    alert('Settings saved successfully!');
+                }
+            });
+        }
+
+        function removeGuider(button) {
+            const item = button.parentElement;
+            const guiderText = item.firstChild.textContent.trim();
+
+            fetch('/api/settings/guiders', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ guider: guiderText })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    item.remove();
+                }
+            });
+        }
+
+        function removeSource(button) {
+            const item = button.parentElement;
+            const sourceUrl = item.firstChild.textContent.trim();
+
+            fetch('/api/settings/sources', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: sourceUrl })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    item.remove();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
