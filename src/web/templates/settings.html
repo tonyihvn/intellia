@@ -3,186 +3,390 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenMRS Query Interface - Settings</title>
+    <title>OpenMRS Query Assistant - Settings</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* ... (include styles from index.html) ... */
-        .settings-container {
-            max-width: 800px;
-            margin: 20px auto;
-            padding: 20px;
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        .section {
-            margin-bottom: 30px;
-            padding: 20px;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-        }
-
-        .section h2 {
-            margin-top: 0;
-            color: #007bff;
-        }
-
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-
-        .form-control {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ced4da;
+        .viz-option {
+            display: inline-block;
+            padding: 8px 16px;
+            margin: 4px;
+            border: 1px solid #ddd;
             border-radius: 4px;
+            cursor: pointer;
         }
-
+        .viz-option.active {
+            background-color: #007bff;
+            color: white;
+            border-color: #0056b3;
+        }
         .guider-item, .source-item {
             padding: 10px;
             margin: 5px 0;
-            background: #f8f9fa;
+            border: 1px solid #ddd;
             border-radius: 4px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-
-        .btn-add {
-            background: #28a745;
-            color: white;
-        }
-
         .btn-remove {
-            background: #dc3545;
-            color: white;
-            padding: 5px 10px;
+            padding: 0 8px;
+            color: #dc3545;
+            background: none;
+            border: none;
         }
-
-        .visualization-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .viz-option {
-            padding: 10px;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            text-align: center;
-            cursor: pointer;
-        }
-
-        .viz-option.active {
-            background: #007bff;
-            color: white;
+        .btn-remove:hover {
+            color: #bd2130;
         }
     </style>
 </head>
 <body>
-    <div class="settings-container">
-        <h1>Settings</h1>
-
-        <!-- Guiders Section -->
-        <div class="section" id="guiders-section">
-            <h2>Guiders / Training Data</h2>
-            <div class="form-group">
-                <label for="new-guider">Add New Guider:</label>
-                <textarea id="new-guider" class="form-control" rows="3" 
-                    placeholder="Enter information to help the AI understand the data structure or business rules..."></textarea>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">OpenMRS Query Assistant</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/settings/db">Database Config</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/settings">LLM Settings</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/rag">RAG Management</a>
+                    </li>
+                </ul>
             </div>
-            <button onclick="addGuider()" class="btn btn-add">Add Guider</button>
-            <div id="guiders-list">
-                <!-- Guiders will be listed here -->
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h2>LLM Settings</h2>
+        
+        <!-- Cloud Providers Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">Cloud LLM Providers</h3>
+            </div>
+            <div class="card-body">
+                <!-- Providers Management -->
+                <div class="mb-4">
+                    <h4 class="h6">Providers Management</h4>
+                    <div id="providersList" class="mb-3"></div>
+                    <button class="btn btn-primary" id="saveProvidersBtn">Save Provider Settings</button>
+                </div>
+                <!-- Generic providers panel renders here -->
+            </div>
+        </div>
+
+        <!-- Local Models Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">Local Models (Ollama)</h3>
+            </div>
+            <div class="card-body">
+                <div id="ollamaStatus" class="alert alert-info">
+                    Checking Ollama status...
+                </div>
+                
+                <form id="ollamaForm">
+                    <div class="mb-3">
+                        <label class="form-label">Available Models</label>
+                        <div class="model-list">
+                            <!-- Models will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    <button type="button" id="pullModels" class="btn btn-primary">Pull Missing Models</button>
+                    <button type="button" id="checkOllama" class="btn btn-secondary">Check Ollama Status</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Training Data Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">Training Data</h3>
+            </div>
+            <div class="card-body">
+                <form id="trainingForm" onsubmit="addGuider(event)">
+                    <div class="mb-3">
+                        <label for="new-guider" class="form-label">Add New Training Data:</label>
+                        <textarea id="new-guider" class="form-control" rows="3" 
+                            placeholder="Enter information to help the AI understand the data structure or business rules..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Training Data</button>
+                </form>
+                <div id="guiders-list" class="mt-3">
+                    <!-- Existing guiders will be listed here -->
+                </div>
             </div>
         </div>
 
         <!-- Context Sources Section -->
-        <div class="section" id="sources-section">
-            <h2>External Context Sources</h2>
-            <div class="form-group">
-                <label for="new-source-url">Add URL Source:</label>
-                <input type="url" id="new-source-url" class="form-control" 
-                    placeholder="Enter URL to documentation or reference...">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">External Context Sources</h3>
             </div>
-            <div class="form-group">
-                <label for="source-file">Upload Document:</label>
-                <input type="file" id="source-file" class="form-control">
-            </div>
-            <button onclick="addSource()" class="btn btn-add">Add Source</button>
-            <div id="sources-list">
-                <!-- Sources will be listed here -->
+            <div class="card-body">
+                <form id="sourcesForm" onsubmit="addSource(event)">
+                    <div class="mb-3">
+                        <label for="new-source-url" class="form-label">Add URL Source:</label>
+                        <input type="url" id="new-source-url" class="form-control" 
+                            placeholder="Enter URL to documentation or reference...">
+                    </div>
+                    <div class="mb-3">
+                        <label for="source-file" class="form-label">Upload Document:</label>
+                        <input type="file" id="source-file" class="form-control">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Source</button>
+                </form>
+                <div id="sources-list" class="mt-3">
+                    <!-- Sources will be listed here -->
+                </div>
             </div>
         </div>
 
         <!-- Visualization Preferences -->
-        <div class="section" id="visualization-section">
-            <h2>Visualization Preferences</h2>
-            <div class="form-group">
-                <label>Preferred Chart Types:</label>
-                <div class="visualization-options" id="chart-options">
-                    <!-- Chart options will be added here -->
-                </div>
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">Visualization Preferences</h3>
             </div>
-            <div class="form-group">
-                <label>Default Output Format:</label>
-                <select id="default-format" class="form-control">
-                    <option value="html">Interactive HTML</option>
-                    <option value="pdf">PDF Document</option>
-                    <option value="xlsx">Excel Spreadsheet</option>
-                    <option value="png">PNG Image</option>
-                </select>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Preferred Chart Types:</label>
+                    <div class="visualization-options" id="chart-options">
+                        <!-- Chart options will be added here -->
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="default-format" class="form-label">Default Output Format:</label>
+                    <select id="default-format" class="form-control">
+                        <option value="html">Interactive HTML</option>
+                        <option value="pdf">PDF Document</option>
+                        <option value="xlsx">Excel Spreadsheet</option>
+                        <option value="png">PNG Image</option>
+                    </select>
+                </div>
+                <button onclick="saveSettings()" class="btn btn-primary">Save All Settings</button>
             </div>
         </div>
-
-        <button onclick="saveSettings()" class="btn btn-primary">Save All Settings</button>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Load current settings when page loads
-        document.addEventListener('DOMContentLoaded', loadSettings);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSettings();
+            checkOllamaStatus();
+            loadProviders();
+        });
 
-        function loadSettings() {
-            // Load guiders
-            fetch('/api/settings/guiders')
-                .then(response => response.json())
-                .then(guiders => {
-                    const guidersList = document.getElementById('guiders-list');
-                    guidersList.innerHTML = '';
-                    guiders.forEach(guider => {
-                        addGuiderToList(guider);
-                    });
-                });
-
-            // Load context sources
-            fetch('/api/settings/sources')
-                .then(response => response.json())
-                .then(sources => {
-                    const sourcesList = document.getElementById('sources-list');
-                    sourcesList.innerHTML = '';
-                    sources.forEach(source => {
-                        addSourceToList(source);
-                    });
-                });
-
-            // Load visualization preferences
-            fetch('/api/settings/visualization')
-                .then(response => response.json())
-                .then(config => {
-                    document.getElementById('default-format').value = config.default_format;
-                    setupChartOptions(config.preferred_charts);
-                });
+        // ===== LLM Provider Settings =====
+        async function loadProviders() {
+            const list = document.getElementById('providersList');
+            list.innerHTML = 'Loading providers...';
+            try {
+                const res = await fetch('/api/llm/providers');
+                const providers = await res.json();
+                const providerNames = Object.keys(providers).sort((a,b) => (providers[a].priority||99) - (providers[b].priority||99));
+                list.innerHTML = providerNames.map(name => {
+                    const p = providers[name];
+                    return `
+                    <div class="border rounded p-3 mb-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong>${name}</strong>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="prov-${name}-enabled" ${p.enabled ? 'checked' : ''}>
+                                <label class="form-check-label" for="prov-${name}-enabled">Enabled</label>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-md-2">
+                                <label class="form-label">Priority</label>
+                                <input type="number" class="form-control" id="prov-${name}-priority" value="${p.priority ?? 99}">
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">Model</label>
+                                <input type="text" class="form-control" id="prov-${name}-model" value="${p.model || ''}">
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">API Key</label>
+                                <input type="password" class="form-control" id="prov-${name}-apikey" placeholder="${p.api_key ? '(saved)' : 'enter key'}">
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                list.innerHTML = '<div class="alert alert-danger">Failed to load providers.</div>'
+            }
         }
 
-        function addGuider() {
+        async function saveProviders() {
+            try {
+                const res = await fetch('/api/llm/providers');
+                const providers = await res.json();
+                const payload = { providers: {} };
+                for (const name of Object.keys(providers)) {
+                    payload.providers[name] = {
+                        enabled: document.getElementById(`prov-${name}-enabled`).checked,
+                        priority: parseInt(document.getElementById(`prov-${name}-priority`).value || '99', 10),
+                        api_key: document.getElementById(`prov-${name}-apikey`).value || undefined,
+                        model: document.getElementById(`prov-${name}-model`).value || providers[name].model || ''
+                    };
+                }
+                const resp = await fetch('/api/llm/providers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) throw new Error(data.error || 'Failed to save');
+                alert('Provider settings saved');
+            } catch (e) {
+                alert('Error saving providers: ' + e.message);
+            }
+        }
+
+        document.getElementById('saveProvidersBtn').addEventListener('click', saveProviders);
+
+        async function saveProviderSettings(event, provider) {
+            event.preventDefault();
+            
+            const form = event.target;
+            const formData = new FormData(form);
+            const config = {};
+            
+            for (let [key, value] of formData.entries()) {
+                config[key] = value;
+            }
+            
+            try {
+                const response = await fetch('/api/llm/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        provider: provider,
+                        config: config
+                    })
+                });
+
+                if (!response.ok) {
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error ${response.status}`);
+                    } else {
+                        const text = await response.text();
+                        console.error('Server returned:', text);
+                        throw new Error(`HTTP error ${response.status}`);
+                    }
+                }
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Settings saved successfully');
+                } else {
+                    throw new Error(data.error || 'Failed to save settings');
+                }
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                alert('Error saving settings: ' + error.message);
+            }
+        }
+
+        async function testProvider(provider) {
+            try {
+                const response = await fetch('/api/llm/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ provider: provider })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert(data.message || 'Connection test successful');
+                } else {
+                    throw new Error(data.error || 'Connection test failed');
+                }
+            } catch (error) {
+                console.error('Error testing connection:', error);
+                alert('Error testing connection: ' + error.message);
+            }
+        }
+
+        // ===== Ollama Local Model Management =====
+        async function checkOllamaStatus() {
+            const statusDiv = document.getElementById('ollamaStatus');
+            try {
+                const response = await fetch('/api/llm/ollama/status');
+                const data = await response.json();
+                
+                if (data.running) {
+                    statusDiv.className = 'alert alert-success';
+                    statusDiv.textContent = 'Ollama is running';
+                    loadOllamaModels();
+                } else {
+                    statusDiv.className = 'alert alert-warning';
+                    statusDiv.textContent = 'Ollama is not running';
+                }
+            } catch (error) {
+                statusDiv.className = 'alert alert-danger';
+                statusDiv.textContent = 'Error checking Ollama status';
+            }
+        }
+
+        async function loadOllamaModels() {
+            const modelList = document.querySelector('.model-list');
+            try {
+                const response = await fetch('/api/llm/ollama/models');
+                const data = await response.json();
+                
+                modelList.innerHTML = data.models.map(model => `
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="model-${model.name}" 
+                               ${model.installed ? 'checked' : ''}>
+                        <label class="form-check-label" for="model-${model.name}">
+                            ${model.name} ${model.installed ? '(Installed)' : ''}
+                        </label>
+                    </div>
+                `).join('');
+            } catch (error) {
+                modelList.innerHTML = '<div class="alert alert-danger">Error loading models</div>';
+            }
+        }
+
+        document.getElementById('pullModels').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/llm/ollama/pull', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('Models pulled successfully');
+                    loadOllamaModels();
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                alert('Error pulling models: ' + error.message);
+            }
+        });
+
+        document.getElementById('checkOllama').addEventListener('click', checkOllamaStatus);
+
+        // ===== Training Data Management =====
+        function addGuider(event) {
+            event.preventDefault();
             const guiderText = document.getElementById('new-guider').value.trim();
             if (!guiderText) return;
 
@@ -196,13 +400,60 @@
                 if (result.success) {
                     addGuiderToList(guiderText);
                     document.getElementById('new-guider').value = '';
+                } else {
+                    throw new Error(result.error || 'Failed to add training data');
                 }
+            })
+            .catch(error => {
+                alert('Error adding training data: ' + error.message);
             });
         }
 
-        function addSource() {
+        function addGuiderToList(guider) {
+            const guidersList = document.getElementById('guiders-list');
+            const div = document.createElement('div');
+            div.className = 'guider-item';
+            div.innerHTML = `
+                <span>${guider}</span>
+                <button onclick="removeGuider(this)" class="btn btn-remove">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            guidersList.appendChild(div);
+        }
+
+        function removeGuider(button) {
+            const item = button.parentElement;
+            const guiderText = item.querySelector('span').textContent;
+
+            fetch('/api/settings/guiders', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ guider: guiderText })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    item.remove();
+                } else {
+                    throw new Error(result.error || 'Failed to remove training data');
+                }
+            })
+            .catch(error => {
+                alert('Error removing training data: ' + error.message);
+            });
+        }
+
+        // ===== Context Sources Management =====
+        function addSource(event) {
+            event.preventDefault();
             const sourceUrl = document.getElementById('new-source-url').value.trim();
             const sourceFile = document.getElementById('source-file').files[0];
+
+            if (!sourceUrl && !sourceFile) {
+                alert('Please provide either a URL or a file');
+                return;
+            }
 
             const formData = new FormData();
             if (sourceUrl) formData.append('url', sourceUrl);
@@ -218,21 +469,13 @@
                     addSourceToList(result.source);
                     document.getElementById('new-source-url').value = '';
                     document.getElementById('source-file').value = '';
+                } else {
+                    throw new Error(result.error || 'Failed to add source');
                 }
+            })
+            .catch(error => {
+                alert('Error adding source: ' + error.message);
             });
-        }
-
-        function addGuiderToList(guider) {
-            const guidersList = document.getElementById('guiders-list');
-            const div = document.createElement('div');
-            div.className = 'guider-item';
-            div.innerHTML = `
-                ${guider}
-                <button onclick="removeGuider(this)" class="btn btn-remove">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
-            guidersList.appendChild(div);
         }
 
         function addSourceToList(source) {
@@ -240,7 +483,7 @@
             const div = document.createElement('div');
             div.className = 'source-item';
             div.innerHTML = `
-                ${source.url || source.filename}
+                <span>${source.url || source.filename}</span>
                 <button onclick="removeSource(this)" class="btn btn-remove">
                     <i class="fas fa-times"></i>
                 </button>
@@ -248,7 +491,30 @@
             sourcesList.appendChild(div);
         }
 
-        function setupChartOptions(preferred) {
+        function removeSource(button) {
+            const item = button.parentElement;
+            const sourceId = item.querySelector('span').textContent;
+
+            fetch('/api/settings/sources', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: sourceId })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    item.remove();
+                } else {
+                    throw new Error(result.error || 'Failed to remove source');
+                }
+            })
+            .catch(error => {
+                alert('Error removing source: ' + error.message);
+            });
+        }
+
+        // ===== Visualization Settings =====
+        function setupChartOptions(preferred = []) {
             const chartTypes = [
                 'bar', 'line', 'pie', 'scatter', 'heatmap',
                 'timeline', 'comparison', 'distribution'
@@ -269,7 +535,6 @@
         }
 
         function saveSettings() {
-            // Collect all settings
             const settings = {
                 visualization: {
                     preferred_charts: Array.from(document.querySelectorAll('.viz-option.active'))
@@ -278,7 +543,6 @@
                 }
             };
 
-            // Save visualization preferences
             fetch('/api/settings/visualization', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -287,44 +551,143 @@
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    alert('Settings saved successfully!');
+                    alert('Settings saved successfully');
+                } else {
+                    throw new Error(result.error || 'Failed to save settings');
                 }
-            });
-        }
-
-        function removeGuider(button) {
-            const item = button.parentElement;
-            const guiderText = item.firstChild.textContent.trim();
-
-            fetch('/api/settings/guiders', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ guider: guiderText })
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    item.remove();
-                }
+            .catch(error => {
+                alert('Error saving settings: ' + error.message);
             });
         }
 
-        function removeSource(button) {
-            const item = button.parentElement;
-            const sourceUrl = item.firstChild.textContent.trim();
+        // ===== Load All Settings =====
+        function loadSettings() {
+            // Load provider settings
+            fetch('/api/llm/config')
+                .then(response => response.json())
+                .then(data => {
+                    const config = data.providers || {};
+                    for (const [provider, settings] of Object.entries(config)) {
+                        const form = document.getElementById(`${provider}Form`);
+                        if (form) {
+                            for (const [key, value] of Object.entries(settings)) {
+                                const input = form.querySelector(`[name="${key}"]`);
+                                if (input) {
+                                    input.value = value;
+                                }
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading LLM settings:', error);
+                });
 
-            fetch('/api/settings/sources', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source: sourceUrl })
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    item.remove();
-                }
-            });
+            // Load training data
+            fetch('/api/settings/guiders')
+                .then(response => response.json())
+                .then(data => {
+                    const guidersList = document.getElementById('guiders-list');
+                    guidersList.innerHTML = '';
+                    data.guiders.forEach(guider => {
+                        addGuiderToList(guider);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading training data:', error);
+                });
+
+            // Load context sources
+            fetch('/api/settings/sources')
+                .then(response => response.json())
+                .then(data => {
+                    const sourcesList = document.getElementById('sources-list');
+                    sourcesList.innerHTML = '';
+                    data.sources.forEach(source => {
+                        addSourceToList(source);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading context sources:', error);
+                });
+
+            // Load visualization preferences
+            fetch('/api/settings/visualization')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('default-format').value = data.default_format || 'html';
+                    setupChartOptions(data.preferred_charts || []);
+                })
+                .catch(error => {
+                    console.error('Error loading visualization settings:', error);
+                    setupChartOptions();
+                });
         }
+    
+        // Load current settings when page loads
+        document.addEventListener('DOMContentLoaded', loadSettings);
+
+        async function saveProviderSettings(event, provider) {
+            event.preventDefault();
+            
+            const form = event.target;
+            const formData = new FormData(form);
+            const config = {};
+            
+            for (let [key, value] of formData.entries()) {
+                config[key] = value;
+            }
+            
+            try {
+                const response = await fetch('/api/llm/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        provider: provider,
+                        config: config
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert(data.message || 'Settings saved successfully');
+                } else {
+                    throw new Error(data.error || 'Failed to save settings');
+                }
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                alert('Error saving settings: ' + error.message);
+            }
+        }
+
+        function loadSettings() {
+            // Load current config
+            fetch('/api/llm/config')
+                .then(response => response.json())
+                .then(data => {
+                    const config = data.providers || {};
+                    for (const [provider, settings] of Object.entries(config)) {
+                        const form = document.getElementById(`${provider}Form`);
+                        if (form) {
+                            for (const [key, value] of Object.entries(settings)) {
+                                const input = form.querySelector(`[name="${key}"]`);
+                                if (input) {
+                                    input.value = value;
+                                }
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading settings:', error);
+                    alert('Error loading settings: ' + error.message);
+                });
+        }
+
+        // (Removed duplicate and incomplete function definitions to fix syntax errors)
     </script>
 </body>
 </html>

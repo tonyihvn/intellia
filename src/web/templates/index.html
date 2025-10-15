@@ -1,502 +1,457 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCP OpenMRS Application</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f4f4;
-            display: flex;
-        }
+{% extends "base.html" %}
 
-        /* Sidebar Styles */
-        .sidebar {
-            width: 300px;
-            height: 100vh;
-            background: #fff;
-            padding: 20px;
-            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
-            overflow-y: auto;
-            position: fixed;
-            left: 0;
-        }
+{% block title %}OpenMRS Query Assistant{% endblock %}
 
-        .sidebar h3 {
-            margin-bottom: 20px;
-            color: #333;
-        }
+{% block extra_css %}
+<style>
+    /* Sidebar Styles */
+    .sidebar {
+        width: 300px;
+        height: calc(100vh - 72px);
+        background: #fff;
+        padding: 20px;
+        box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+        overflow-y: auto;
+        position: fixed;
+        left: 0;
+        top: 72px; /* Account for navbar height */
+    }
 
-        .history-item {
-            padding: 10px;
-            margin-bottom: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            cursor: pointer;
-            position: relative;
-        }
+    .history-item {
+        padding: 10px;
+        margin-bottom: 10px;
+        background: #f8f9fa;
+        border-radius: 5px;
+        cursor: pointer;
+        position: relative;
+    }
 
-        .history-item:hover {
-            background: #e9ecef;
-        }
+    .history-item:hover {
+        background: #e9ecef;
+    }
 
-        .delete-btn {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #dc3545;
-            cursor: pointer;
-        }
+    .delete-btn {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #dc3545;
+        cursor: pointer;
+    }
 
-        /* Main Content Styles */
-        .main-content {
-            margin-left: 320px;
-            padding: 20px;
-            flex-grow: 1;
-        }
+    /* Main Content Styles */
+    .main-content {
+        margin-left: 320px;
+        padding: 20px;
+    }
 
-        header {
-            background: #007bff;
-            color: #fff;
-            padding: 15px;
-            text-align: center;
-            margin-bottom: 20px;
-            border-radius: 5px;
-        }
+    .query-container {
+        background: #fff;
+        padding: 20px;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
 
-        .container {
-            background: #fff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }
+    .query-input {
+        width: 100%;
+        padding: 10px;
+        margin: 10px 0;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        resize: vertical;
+        min-height: 100px;
+    }
 
-        .query-input {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            resize: vertical;
-        }
+    #result {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 5px;
+        background: #f8f9fa;
+        min-height: 100px;
+    }
 
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin: 10px 0;
-        }
+    .result-table {
+        width: 100%;
+        margin-top: 15px;
+        border-collapse: collapse;
+    }
 
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
+    .result-table th,
+    .result-table td {
+        padding: 8px;
+        border: 1px solid #dee2e6;
+    }
 
-        .generate-btn {
-            background: #28a745;
-            color: #fff;
-        }
+    .result-table th {
+        background-color: #f8f9fa;
+    }
+</style>
+{% endblock %}
 
-        .execute-btn {
-            background: #007bff;
-            color: #fff;
-        }
-
-        .generate-btn:hover, .execute-btn:hover {
-            opacity: 0.9;
-        }
-
-        .sql-display {
-            margin: 20px 0;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border: 1px solid #dee2e6;
-        }
-
-        .response-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .visualization-controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .visualization-controls select {
-            padding: 5px;
-            border-radius: 4px;
-            border: 1px solid #ccc;
-        }
-
-        .explanation-text {
-            margin-top: 20px;
-            padding: 15px;
-            background: #e9ecef;
-            border-radius: 5px;
-            color: #495057;
-            line-height: 1.6;
-        }
-
-        #chart-container {
-            width: 100%;
-            margin-top: 20px;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-            padding: 15px;
-        }
-
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-radius: 50%;
-            border-top: 3px solid #007bff;
-            animation: spin 1s linear infinite;
-            margin-right: 10px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-    <!-- Include Chart.js for visualizations -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-    <!-- Sidebar -->
+{% block content %}
+<div class="d-flex">
     <div class="sidebar">
-        <h3>Question History</h3>
-        <div id="history-list">
-            <!-- History items will be added here dynamically -->
+        <h3>Query History</h3>
+        <div id="queryHistory">
+            <!-- Query history will be dynamically populated here -->
         </div>
     </div>
 
-    <!-- Main Content -->
     <div class="main-content">
-        <header>
-            <h1>OpenMRS Query Interface</h1>
-            <div class="header-controls">
-                <a href="/db-config" class="btn config-btn" title="Configure Database">
-                    <i class="fas fa-cog"></i> Database Settings
-                </a>
-            </div>
-        </header>
+        <div class="query-container">
+            <header>
+                <h2>Natural Language to SQL Query</h2>
+            </header>
 
-        <div class="container">
-            <textarea id="question" class="query-input" rows="3" 
-                placeholder="Enter your question about OpenMRS data..."></textarea>
-            
-            <div class="button-group">
-                <button onclick="generateQuery()" class="btn generate-btn">
-                    Generate SQL Query
+            <div class="mb-3">
+                <label for="questionInput" class="form-label">Enter your question about the OpenMRS database:</label>
+                <textarea class="query-input" id="questionInput" rows="4" 
+                    placeholder="Example: Show me all patients diagnosed with malaria in the last month"></textarea>
+            </div>
+
+            <div class="button-group mb-4">
+                <button id="generateBtn" class="btn btn-primary">
+                    <i class="fas fa-cog"></i> Go
                 </button>
-                <button onclick="executeQuery()" class="btn execute-btn">
-                    Execute Query
+                <button id="executeBtn" class="btn btn-success" disabled>
+                    <i class="fas fa-play"></i> Execute Query
+                </button>
+                <button id="saveBtn" class="btn btn-secondary" disabled>
+                    <i class="fas fa-save"></i> Save Query
                 </button>
             </div>
 
-            <div id="sql-display" class="sql-display" style="display: none;">
-                <h3>Generated SQL Query: <small>(edit if needed)</small></h3>
-                <textarea id="sql-query" class="query-input" style="font-family: monospace;" rows="4"></textarea>
-                <div class="button-group" style="justify-content: flex-end;">
-                    <button onclick="executeEditedQuery()" class="btn execute-btn">
-                        Run Modified Query
-                    </button>
-                </div>
+            <div id="generatedSQL" class="mb-4" style="display: none;">
+                <h3>Generated SQL (editable):</h3>
+                <textarea id="sqlEditor" class="form-control" rows="8" spellcheck="false" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
             </div>
 
-            <div id="response" class="response" style="display: none;">
-                <div class="response-header">
-                    <h3>Query Results:</h3>
-                    <div class="visualization-controls">
-                        <label for="viz-type">View as:</label>
-                        <select id="viz-type" onchange="changeVisualization()">
-                            <option value="table">Table</option>
-                            <option value="chart">Chart</option>
-                            <option value="text">Plain Text</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="result-content"></div>
-                <div id="chart-container" style="display: none; height: 400px;"></div>
-                <div id="explanation" class="explanation-text"></div>
+            <div id="llmPrompt" class="mb-4" style="display: none;">
+                <h3>LLM Prompt (context sent):</h3>
+                <pre style="white-space: pre-wrap; font-size: 12px;" id="promptView"></pre>
+            </div>
+
+            <div id="result">
+                <!-- Query results will be displayed here -->
+                <p class="text-muted">Results will appear here after executing the query.</p>
             </div>
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <script>
-        let currentQuery = '';
-        let currentQuestion = '';
-        
-        // Load query history when page loads
-        window.addEventListener('DOMContentLoaded', (event) => {
-            loadQueryHistory();
-        });
-        
-        async function loadQueryHistory() {
-            try {
-                const response = await fetch('/api/history');
-                const history = await response.json();
-                
-                const historyList = document.getElementById('history-list');
-                historyList.innerHTML = ''; // Clear existing history
-                
-                history.forEach(item => {
-                    const historyItem = document.createElement('div');
-                    historyItem.className = 'history-item';
-                    historyItem.innerHTML = `
-                        ${item.question}
-                        <span class="delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(this);">
-                            <i class="fas fa-times"></i>
-                        </span>
-                    `;
-                    historyItem.onclick = () => rerunQuery(item.question);
-                    historyList.appendChild(historyItem);
-                });
-            } catch (error) {
-                console.error('Error loading history:', error);
-            }
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prismjs/1.24.1/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prismjs/1.24.1/components/prism-sql.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+        const question = document.getElementById('questionInput').value.trim();
+        if (!question) {
+            alert('Please enter a question.');
+            return;
         }
-        
-        async function generateQuery() {
-            const question = document.getElementById('question').value.trim();
-            if (!question) return;
-            
-            try {
-                // Show loading state
-                document.getElementById('sql-display').style.display = 'block';
-                document.getElementById('sql-query').value = 'Generating SQL...';
-                
-                const response = await fetch('/api/query', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        question: question,
-                        action: 'generate'
-                    })
-                });
-                
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
+
+        try {
+            const response = await fetch('/api/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ question })
+            });
+
+            const data = await response.json();
+            if (data.sql) {
+                const editor = document.getElementById('sqlEditor');
+                editor.value = data.sql;
+                document.getElementById('generatedSQL').style.display = 'block';
+                if (data.prompt) {
+                    document.getElementById('promptView').textContent = data.prompt;
+                    document.getElementById('llmPrompt').style.display = 'block';
                 }
-                
-                currentQuery = data.sql;
-                currentQuestion = question;
-                
-                // Display the SQL
-                document.getElementById('sql-query').value = data.sql;
-                
-                // Add to history
-                addToHistory(question);
-                
-                // Auto-execute the query
-                executeQuery();
-                
-            } catch (error) {
-                alert('Error: ' + error.message);
+                document.getElementById('executeBtn').disabled = false;
+                document.getElementById('saveBtn').disabled = false;
+            } else {
+                alert('Failed to generate SQL query.');
             }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error generating SQL query.');
         }
-        
-        async function executeQuery() {
-            if (!currentQuery) {
-                alert('Please generate a SQL query first.');
+    });
+
+    document.getElementById('executeBtn').addEventListener('click', async () => {
+        const sql = document.getElementById('sqlEditor').value;
+        try {
+            const response = await fetch('/api/execute', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ sql })
+            });
+
+            const data = await response.json();
+            displayResults(data);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error executing query.');
+        }
+    });
+
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+        const question = document.getElementById('questionInput').value;
+        const sql = document.getElementById('sqlEditor').value;
+
+        try {
+            const response = await fetch('/api/history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ question, sql })
+            });
+
+            if (response.ok) {
+                alert('Query saved successfully!');
+                loadQueryHistory();
+            } else {
+                alert('Failed to save query.');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error saving query.');
+        }
+    });
+
+    function displayResults(data) {
+        const resultDiv = document.getElementById('result');
+        if (!data) {
+            resultDiv.innerHTML = '<p class="text-muted">No results found.</p>';
+            return;
+        }
+
+        // Allow output hint in question: text|pdf|xlsx|table|chart
+        const question = document.getElementById('questionInput').value.toLowerCase();
+        const wantsText = question.includes('text');
+        const wantsPdf = question.includes('pdf');
+        const wantsExcel = question.includes('excel') || question.includes('xlsx');
+        const wantsChart = question.includes('chart') || question.includes('graph');
+
+        if (wantsText && Array.isArray(data) && data.length) {
+            const keys = Object.keys(data[0]);
+            const lines = data.map(r => keys.map(k => `${k}: ${r[k]}`).join(', '));
+            resultDiv.innerHTML = `<pre>${lines.join('\n')}</pre>`;
+            return;
+        }
+
+        if (wantsExcel) {
+            // Offer CSV download as a quick win
+            if (!Array.isArray(data) || !data.length) {
+                resultDiv.innerHTML = '<p class="text-muted">No data to export.</p>';
                 return;
             }
-            
-            try {
-                const response = await fetch('/api/query', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        question: currentQuestion,
-                        action: 'execute',
-                        sql: currentQuery
-                    })
-                });
-                
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                
-                // Display the results
-                document.getElementById('result-content').innerHTML = formatResults(data.result);
-                document.getElementById('response').style.display = 'block';
-                
-            } catch (error) {
-                alert('Error: ' + error.message);
-            }
-        }
-        
-        function formatResults(results) {
-            if (!Array.isArray(results)) {
-                return '<pre>' + JSON.stringify(results, null, 2) + '</pre>';
-            }
-            
-            if (results.length === 0) {
-                return '<p>No results found.</p>';
-            }
-
-            // Store results globally for visualization
-            window.currentResults = results;
-            
-            let html = '<table border="1" style="width:100%; border-collapse: collapse;">';
-            
-            // Headers
-            html += '<tr>';
-            for (let key of Object.keys(results[0])) {
-                html += `<th style="padding: 8px; text-align: left;">${key}</th>`;
-            }
-            html += '</tr>';
-            
-            // Data
-            for (let row of results) {
-                html += '<tr>';
-                for (let value of Object.values(row)) {
-                    html += `<td style="padding: 8px;">${value || 'N/A'}</td>`;
-                }
-                html += '</tr>';
-            }
-            
-            html += '</table>';
-
-            // Generate natural language explanation
-            const explanation = generateExplanation(results);
-            document.getElementById('explanation').innerHTML = explanation;
-
-            return html;
+            const headers = Object.keys(data[0]);
+            const csv = [headers.join(',')].concat(
+                data.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))
+            ).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            resultDiv.innerHTML = `<a href="${url}" download="results.csv" class="btn btn-secondary">Download CSV (Excel)</a>`;
+            return;
         }
 
-        function generateExplanation(results) {
-            if (!results || results.length === 0) return '';
-            
-            const count = results.length;
-            const fields = Object.keys(results[0]);
-            
-            let explanation = `<p>The query returned ${count} result${count !== 1 ? 's' : ''}. `;
-            
-            if (count > 0) {
-                // Add summary of numeric fields
-                const numericFields = fields.filter(field => 
-                    typeof results[0][field] === 'number');
-                
-                numericFields.forEach(field => {
-                    const values = results.map(r => r[field]).filter(v => v != null);
-                    if (values.length > 0) {
-                        const avg = values.reduce((a, b) => a + b) / values.length;
-                        const max = Math.max(...values);
-                        explanation += `<br>The average ${field.replace(/_/g, ' ')} is ${avg.toFixed(2)}, `;
-                        explanation += `with the highest being ${max}.`;
-                    }
-                });
-            }
-            
-            explanation += '</p>';
-            return explanation;
+        if (wantsPdf) {
+            // Simple print-to-PDF suggestion; full PDF gen could be added later
+            resultDiv.innerHTML = '<p class="text-muted">Use browser Print to save as PDF after viewing the table.</p>';
         }
 
-        function changeVisualization() {
-            const vizType = document.getElementById('viz-type').value;
-            const results = window.currentResults;
-            
-            document.getElementById('result-content').style.display = 
-                vizType === 'table' ? 'block' : 'none';
-            document.getElementById('chart-container').style.display = 
-                vizType === 'chart' ? 'block' : 'none';
-            
-            if (vizType === 'chart' && results && results.length > 0) {
-                createChart(results);
-            }
-        }
-
-        function createChart(data) {
-            const container = document.getElementById('chart-container');
-            container.innerHTML = '<canvas id="resultChart"></canvas>';
-            
-            const firstRow = data[0];
-            const numericFields = Object.keys(firstRow).filter(
-                key => typeof firstRow[key] === 'number'
-            );
-            
-            if (numericFields.length === 0) {
-                container.innerHTML = '<p>No numeric data available for charting.</p>';
+        if (wantsChart) {
+            // Basic bar chart using first numeric column
+            if (!Array.isArray(data) || !data.length) {
+                resultDiv.innerHTML = '<p class="text-muted">No data to chart.</p>';
                 return;
             }
-            
-            const ctx = document.getElementById('resultChart').getContext('2d');
+            const keys = Object.keys(data[0]);
+            const numericKey = keys.find(k => typeof data[0][k] === 'number') || keys[1] || keys[0];
+            const labelKey = keys[0];
+            const labels = data.map(r => String(r[labelKey] ?? ''));
+            const values = data.map(r => Number(r[numericKey] ?? 0));
+            const canvasId = 'chartCanvas';
+            resultDiv.innerHTML = `<canvas id="${canvasId}" height="200"></canvas>`;
+            const ctx = document.getElementById(canvasId).getContext('2d');
             new Chart(ctx, {
                 type: 'bar',
-                data: {
-                    labels: data.map((_, index) => `Row ${index + 1}`),
-                    datasets: numericFields.map(field => ({
-                        label: field,
-                        data: data.map(row => row[field]),
-                        backgroundColor: getRandomColor()
-                    }))
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
+                data: { labels, datasets: [{ label: numericKey, data: values, backgroundColor: '#3498db' }] },
             });
+            return;
         }
 
-        function getRandomColor() {
-            const letters = '0123456789ABCDEF';
-            let color = '#';
-            for (let i = 0; i < 6; i++) {
-                color += letters[Math.floor(Math.random() * 16)];
+        // Default: table view
+        if (!Array.isArray(data) || !data.length) {
+            resultDiv.innerHTML = '<p class="text-muted">No results found.</p>';
+            return;
+        }
+        const table = document.createElement('table');
+        table.className = 'result-table';
+        const headers = Object.keys(data[0]);
+        const headerRow = document.createElement('tr');
+        headers.forEach(header => {
+            const th = document.createElement('th');
+            th.textContent = header;
+            headerRow.appendChild(th);
+        });
+        table.appendChild(headerRow);
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            headers.forEach(header => {
+                const td = document.createElement('td');
+                td.textContent = row[header] ?? '';
+                tr.appendChild(td);
+            });
+            table.appendChild(tr);
+        });
+        resultDiv.innerHTML = '';
+        resultDiv.appendChild(table);
+    }
+
+    async function loadQueryHistory() {
+        try {
+            const response = await fetch('/api/history');
+            if (!response.ok) {
+                throw new Error('Failed to load history');
             }
-            return color;
+            const history = await response.json();
+            
+            const historyDiv = document.getElementById('queryHistory');
+            if (!Array.isArray(history)) {
+                historyDiv.innerHTML = '<p class="text-muted">No history available.</p>';
+                return;
+            }
+            
+            historyDiv.innerHTML = history.map(item => `
+                <div class="history-item" onclick="loadHistoryItem('${item.id}')">
+                    <div class="question">${escapeHtml(item.question)}</div>
+                    <small class="text-muted">${new Date(item.timestamp).toLocaleString()}</small>
+                    <i class="fas fa-trash delete-btn" onclick="deleteHistoryItem(event, '${item.id}')"></i>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading history:', error);
+            document.getElementById('queryHistory').innerHTML = 
+                '<p class="text-danger">Failed to load history. Please try again.</p>';
+        }
+    }
+
+    async function loadHistoryItem(id) {
+        try {
+            const response = await fetch(`/api/history/${id}`);
+            if (!response.ok) {
+                throw new Error('Failed to load history item');
+            }
+            const item = await response.json();
+            
+            document.getElementById('questionInput').value = item.question;
+            if (item.sql) {
+                document.getElementById('sqlCode').textContent = item.sql;
+                document.getElementById('generatedSQL').style.display = 'block';
+                document.getElementById('executeBtn').disabled = false;
+                document.getElementById('saveBtn').disabled = false;
+                Prism.highlightElement(document.getElementById('sqlCode'));
+            }
+        } catch (error) {
+            console.error('Error loading history item:', error);
+            alert('Error loading history item. Please try again.');
+        }
+    }
+
+    // Function to escape HTML to prevent XSS
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    async function deleteHistoryItem(event, id) {
+        event.stopPropagation();
+        if (!confirm('Are you sure you want to delete this query?')) return;
+
+        try {
+            const response = await fetch(`/api/history/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete history item');
+            }
+            
+            await loadQueryHistory();
+        } catch (error) {
+            console.error('Error deleting history item:', error);
+            alert('Failed to delete history item. Please try again.');
+        }
+    }
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', () => {
+        // Load query history when page loads
+        loadQueryHistory();
+    });
+
+    // Add loading indicators for buttons
+    document.getElementById('generateBtn').addEventListener('click', async (event) => {
+    const button = event.target;
+    const originalText = button.innerHTML;
+    try {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+        
+        const question = document.getElementById('questionInput').value.trim();
+        if (!question) {
+            alert('Please enter a question.');
+            return;
         }
 
-        function executeEditedQuery() {
-            currentQuery = document.getElementById('sql-query').value.trim();
-            executeQuery();
+        const response = await fetch('/api/query', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+                question: question,
+                action: 'generate'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Server returned an error');
+        }
+
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
         }
         
-        function addToHistory(question) {
-            const historyList = document.getElementById('history-list');
-            const historyItem = document.createElement('div');
-            historyItem.className = 'history-item';
-            historyItem.innerHTML = `
-                ${question}
-                <span class="delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(this);">
-                    <i class="fas fa-times"></i>
-                </span>
-            `;
-            historyItem.onclick = () => rerunQuery(question);
-            historyList.insertBefore(historyItem, historyList.firstChild);
+        if (data.sql) {
+            document.getElementById('sqlCode').textContent = data.sql;
+            document.getElementById('generatedSQL').style.display = 'block';
+            document.getElementById('executeBtn').disabled = false;
+            document.getElementById('saveBtn').disabled = false;
+            Prism.highlightElement(document.getElementById('sqlCode'));
+        } else {
+            alert('No SQL query was generated. Please try again.');
         }
-        
-        function deleteHistoryItem(element) {
-            element.parentElement.remove();
-        }
-        
-        function rerunQuery(question) {
-            document.getElementById('question').value = question;
-            generateQuery();
-        }
-    </script>
-</body>
-</html>
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error generating SQL query: ' + error.message);
+    } finally {
+        button.disabled = false;
+        button.innerHTML = originalText;
+    }
+});
+</script>
+{% endblock %}

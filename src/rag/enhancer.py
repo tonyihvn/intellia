@@ -1,5 +1,5 @@
 from typing import List, Dict
-from ..rag.manager import RAGManager
+from .manager import RAGManager
 import json
 import os
 

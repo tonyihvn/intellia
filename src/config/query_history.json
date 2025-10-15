@@ -1,0 +1,23 @@
+[
+  {
+    "id": "582495a1-d580-46d7-a7bf-c8c8db6ab96c",
+    "timestamp": "2025-10-15T15:07:13.258189",
+    "question": "Count active Patient, display their names, and programs enrolled in a table",
+    "status": "error",
+    "error": "Error handling query: Error executing query: 1054 (42S22): Unknown column 'p.name' in 'field list'"
+  },
+  {
+    "id": "da556ef8-9e57-4276-a27e-1f19c538fdd4",
+    "timestamp": "2025-10-15T15:06:59.166706",
+    "question": "Count active Patient, display their names, and programs enrolled in a table",
+    "sql": "SELECT p.patient_id, p.name, po.program_name\nFROM patient p\nJOIN patient_program pp ON p.patient_id = pp.patient_id\nJOIN program po ON pp.program_id = po.program_id\nWHERE p.voided_by IS NULL;",
+    "status": "success"
+  },
+  {
+    "id": "9e579eee-e235-4b5c-8075-a2353782a433",
+    "timestamp": "2025-10-15T15:03:39.812195",
+    "question": "Count active Patient, display their names, and programs enrolled in a table",
+    "status": "error",
+    "error": "Error handling query: Error executing query: 1054 (42S22): Unknown column 'C1.concept_name' in 'field list'"
+  }
+]

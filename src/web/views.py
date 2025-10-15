@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template
+from ..config import Config
 
 view_routes = Blueprint('views', __name__)
 
@@ -8,7 +9,13 @@ def index():
 
 @view_routes.route('/settings')
 def settings():
-    return render_template('settings.html')
+    config = Config.get_llm_config()
+    return render_template('settings.html', config=config)
+
+@view_routes.route('/settings/db')
+def db_config():
+    config = Config.get_db_config()
+    return render_template('db_config.html', config=config)
 
 @view_routes.route('/rag')
 def rag():

@@ -1,0 +1,71 @@
+{
+    "providers": {
+        "openai": {
+            "priority": 1,
+            "api_key": "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",
+            "api_url": "https://api.openai.com/v1/chat/completions",
+            "model": "gpt-3.5-turbo",
+            "enabled": true
+        },
+        "google": {
+            "priority": 2,
+            "api_key": "AIzaSyBW8dr6QtmWRzfPn3M5bUrRWMgQLEN80p4",
+            "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+            "model": "gemini-2.0-flash",
+            "enabled": true
+        },
+        "vertex": {
+            "priority": 3,
+            "api_key": "",
+            "api_url": "https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT/locations/LOCATION/publishers/google/models/gemini-1.5-flash:streamGenerateContent",
+            "model": "gemini-1.5-flash",
+            "enabled": false
+        },
+        "anthropic": {
+            "priority": 3,
+            "api_key": "",
+            "api_url": "https://api.anthropic.com/v1/messages",
+            "model": "claude-3-opus-20240229",
+            "enabled": true
+        },
+        "openrouter": {
+            "priority": 5,
+            "api_key": "",
+            "api_url": "https://openrouter.ai/api/v1/chat/completions",
+            "model": "openrouter/auto",
+            "enabled": false
+        },
+        "cohere": {
+            "priority": 6,
+            "api_key": "",
+            "api_url": "https://api.cohere.ai/v1/chat",
+            "model": "command-r",
+            "enabled": false
+        },
+        "grok": {
+            "priority": 7,
+            "api_key": "",
+            "api_url": "https://api.x.ai/v1/chat/completions",
+            "model": "grok-beta",
+            "enabled": false
+        },
+        "github": {
+            "priority": 8,
+            "api_key": "",
+            "api_url": "https://models.inference.ai.azure.com/chat/completions",
+            "model": "gpt-4o-mini",
+            "enabled": false
+        },
+        "local": {
+            "priority": 4,
+            "models": [
+                "codellama",
+                "llama3",
+                "deepseek-coder"
+            ],
+            "api_url": "http://localhost:11434",
+            "enabled": false,
+            "model": ""
+        }
+    }
+}
