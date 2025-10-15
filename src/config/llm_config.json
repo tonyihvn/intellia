@@ -2,14 +2,14 @@
     "providers": {
         "openai": {
             "priority": 1,
-            "api_key": "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",
+            "api_key": "",
             "api_url": "https://api.openai.com/v1/chat/completions",
             "model": "gpt-3.5-turbo",
             "enabled": true
         },
         "google": {
             "priority": 2,
-            "api_key": "AIzaSyBW8dr6QtmWRzfPn3M5bUrRWMgQLEN80p4",
+            "api_key": "",
             "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
             "model": "gemini-2.0-flash",
             "enabled": true
@@ -57,15 +57,15 @@
             "enabled": false
         },
         "local": {
-            "priority": 4,
+            "priority": 99,
             "models": [
                 "codellama",
                 "llama3",
                 "deepseek-coder"
             ],
             "api_url": "http://localhost:11434",
-            "enabled": false,
-            "model": ""
+            "enabled": true,
+            "model": "codellama"
         }
     }
 }

@@ -158,11 +158,10 @@ def handle_query():
         query_handler = get_query_handler()
         
         if action == 'generate':
-            # Generate prompt + SQL
-            prompt = query_handler.build_prompt(question)
-            sql = query_handler.generate_sql(question)
+            # Generate SQL without executing
+            result = query_handler.handle_query(question, execute=False)
             
-            if not sql:
+            if not result or 'sql' not in result:
                 return jsonify({'error': 'Failed to generate SQL query'}), 500
             
             # Update history
@@ -181,7 +180,7 @@ def handle_query():
             
         else:  # action == 'execute'
             # Generate SQL and execute
-            result = query_handler.handle_query(question)
+            result = query_handler.handle_query(question, execute=True)
             
             # Log the query to history
             history_entry = {
@@ -189,7 +188,8 @@ def handle_query():
                 'timestamp': datetime.now().isoformat(),
                 'question': question,
                 'sql': result.get('sql', ''),
-                'status': 'success' if result.get('results') else 'error',
+                'explanation': result.get('explanation', ''),
+                'status': 'executed' if result.get('results') else 'error',
                 'error': result.get('error', '')
             }
             

@@ -1,23 +1,51 @@
 [
   {
+    "id": "95e179c3-a397-4a28-85ba-689ef3268272",
+    "timestamp": "2025-10-15T17:06:06.101117",
+    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
+    "status": "error",
+    "error": "Error handling query: 'str' object has no attribute 'get'"
+  },
+  {
+    "id": "2ccc39e3-fc92-41d5-b9f7-78f80ddc8bab",
+    "timestamp": "2025-10-15T17:05:52.279896",
+    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
+    "status": "error",
+    "error": "Error handling query: 'str' object has no attribute 'get'"
+  },
+  {
+    "id": "20839cf8-dcbd-47ec-af9b-56195f738ef2",
+    "timestamp": "2025-10-15T16:08:20.879096",
+    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
+    "status": "error",
+    "error": "Error handling query: cannot access local variable 'cloud_candidates' where it is not associated with a value"
+  },
+  {
+    "id": "3a9800c6-d86b-4e19-ae5f-dc8eebd0a0e1",
+    "timestamp": "2025-10-15T16:07:53.681007",
+    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
+    "status": "error",
+    "error": "Error handling query: cannot access local variable 'cloud_candidates' where it is not associated with a value"
+  },
+  {
+    "id": "c84abdc8-bf93-41ba-9f08-65fe4156bd76",
+    "timestamp": "2025-10-15T16:02:31.640393",
+    "question": "Get all patients limit 200, add the enrolled program",
+    "status": "error",
+    "error": "Error handling query: Error executing query: 1146 (42S02): Table 'openmrsmcp.concepts' doesn't exist"
+  },
+  {
+    "id": "51f4de98-82a8-4c96-b8c7-dec4fcb016bd",
+    "timestamp": "2025-10-15T15:56:09.435180",
+    "question": "Get all patients limit 200",
+    "sql": "SELECT * FROM patient LIMIT 200;",
+    "status": "success"
+  },
+  {
     "id": "582495a1-d580-46d7-a7bf-c8c8db6ab96c",
     "timestamp": "2025-10-15T15:07:13.258189",
     "question": "Count active Patient, display their names, and programs enrolled in a table",
     "status": "error",
     "error": "Error handling query: Error executing query: 1054 (42S22): Unknown column 'p.name' in 'field list'"
-  },
-  {
-    "id": "da556ef8-9e57-4276-a27e-1f19c538fdd4",
-    "timestamp": "2025-10-15T15:06:59.166706",
-    "question": "Count active Patient, display their names, and programs enrolled in a table",
-    "sql": "SELECT p.patient_id, p.name, po.program_name\nFROM patient p\nJOIN patient_program pp ON p.patient_id = pp.patient_id\nJOIN program po ON pp.program_id = po.program_id\nWHERE p.voided_by IS NULL;",
-    "status": "success"
-  },
-  {
-    "id": "9e579eee-e235-4b5c-8075-a2353782a433",
-    "timestamp": "2025-10-15T15:03:39.812195",
-    "question": "Count active Patient, display their names, and programs enrolled in a table",
-    "status": "error",
-    "error": "Error handling query: Error executing query: 1054 (42S22): Unknown column 'C1.concept_name' in 'field list'"
   }
 ]

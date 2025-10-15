@@ -71,12 +71,31 @@ class LLMClient:
                 continue
             if not isinstance(cfg, dict):
                 continue
-            if not cfg.get('api_key') or not str(cfg.get('api_key')).strip():
+            # Skip if no api_key and not local provider
+            if name != 'local' and (not cfg.get('api_key') or not str(cfg.get('api_key')).strip()):
+                logging.warning(f"Provider {name} skipped: No API key configured")
                 continue
+                
+            # Skip if explicitly disabled
             if cfg.get('enabled') is False:
+                logging.warning(f"Provider {name} skipped: Disabled in config")
                 continue
-            cloud_candidates.append((cfg.get('priority', 99), name))
+                
+            # Skip if no model configured (except local which gets model from models list)
+            if name != 'local' and (not cfg.get('model') or not str(cfg.get('model')).strip()):
+                logging.warning(f"Provider {name} skipped: No model configured")
+                continue
+                
+            # Use explicit priority or provider-specific defaults
+            priority = cfg.get('priority', 99)
+            if name == 'local':
+                priority = 99  # Always make local highest priority (last resort)
+            cloud_candidates.append((priority, name))
+        
+        # Sort by priority and log priorities
         cloud_candidates.sort(key=lambda x: x[0])
+        for priority, name in cloud_candidates:
+            logging.info(f"Provider {name} priority: {priority}")
         self.available_cloud_providers = [name for _, name in cloud_candidates]
         if self.available_cloud_providers:
             # Set current to top priority cloud
@@ -157,6 +176,7 @@ class LLMClient:
     def generate_sql(self, prompt):
         """
         Attempts to generate SQL using cloud providers first, with local fallback only as last resort.
+        Returns a dictionary containing both the complete response and extracted SQL.
         """
         logging.info(f"\n{'='*50}\nSQL Generation Request\n{'='*50}")
         logging.info(f"Original prompt: {prompt}")
@@ -182,7 +202,7 @@ class LLMClient:
             cloud_candidates.sort(key=lambda x: x[0])
             for _, name in cloud_candidates:
                 providers_to_try.append(name)
-                logging.info(f"Added cloud provider to try: {name}")
+                logging.info(f"Added cloud provider to try: {name} (priority: {cfg.get('priority', 99)})")
             
             if providers_to_try:
                 logging.info(f"Will try cloud providers in order: {providers_to_try}")
@@ -191,8 +211,15 @@ class LLMClient:
         else:
             logging.warning("No internet connection for cloud providers")
         
-        # Only add local as last resort
-        providers_to_try.append('local')
+        # Always add local as last resort with highest priority
+        if 'local' not in providers_to_try:
+            if self._check_ollama_connection():
+                local_cfg = self.providers.get('local', {})
+                local_cfg['priority'] = 99  # Ensure local is last
+                cloud_candidates.append((local_cfg.get('priority', 99), 'local'))
+                cloud_candidates.sort(key=lambda x: x[0])  # Re-sort with local
+                providers_to_try = [name for _, name in cloud_candidates]
+                
         logging.info(f"Final provider order: {providers_to_try}")
         
         # Try each provider in sequence
@@ -388,21 +415,31 @@ class LLMClient:
                 # Extract response based on provider
                 if self.current_provider == 'openai':
                     if 'choices' in result and len(result['choices']) > 0:
-                        content = result['choices'][0]['message']['content'].strip()
-                        return self._extract_sql(content)
+                        full_response = result['choices'][0]['message']['content'].strip()
+                        sql = self._extract_sql(full_response)
+                        return {
+                            'full_response': full_response,
+                            'sql': sql,
+                            'explanation': full_response.replace(sql, '').strip()
+                        }
                         
                 elif self.current_provider == 'google':
                     if 'error' in result:
                         raise Exception(f"Google API error: {result['error']['message']}")
                         
-                    # Extract the SQL from the response
+                    # Extract the response
                     if 'candidates' in result and result['candidates']:
                         candidate = result['candidates'][0]
                         content = candidate.get('content', {})
                         if content and 'parts' in content and content['parts']:
-                            text = content['parts'][0].get('text', '').strip()
-                            if text:
-                                return self._extract_sql(text)
+                            full_response = content['parts'][0].get('text', '').strip()
+                            if full_response:
+                                sql = self._extract_sql(full_response)
+                                return {
+                                    'full_response': full_response,
+                                    'sql': sql,
+                                    'explanation': full_response.replace(sql, '').strip()
+                                }
                     
                     # Check for errors
                     if 'promptFeedback' in result:
@@ -420,7 +457,13 @@ class LLMClient:
                         
                 elif self.current_provider == 'anthropic':
                     if 'completion' in result:
-                        return self._extract_sql(result['completion'].strip())
+                        full_response = result['completion'].strip()
+                        sql = self._extract_sql(full_response)
+                        return {
+                            'full_response': full_response,
+                            'sql': sql,
+                            'explanation': full_response.replace(sql, '').strip()
+                        }
                         
                 raise Exception(f"Invalid response format from {self.current_provider} API")
                 
@@ -439,15 +482,25 @@ class LLMClient:
         last_error = None
         ollama_url = self.providers['local']['api_url'].rstrip('/')
 
-        # First check which models are available
+        # First check which models are available and make sure we're connected
         try:
-            response = requests.get(f"{ollama_url}/api/tags")
+            # Try to connect to Ollama first
+            response = requests.get(f"{ollama_url}/api/tags", timeout=5)
             if response.status_code == 200:
+                logging.info("Successfully connected to Ollama")
                 available_models = [m.get('name') for m in response.json().get('models', []) if m.get('name')]
                 available_model_map = {m.split(':')[0]: m for m in available_models}
                 if not available_models:
-                    raise Exception("No models found in Ollama")
-                print(f"Available Ollama models: {available_models}")
+                    logging.warning("No models found in Ollama, will try to pull codellama")
+                    self._ensure_model_available('codellama')
+                    # Refresh model list after pull
+                    response = requests.get(f"{ollama_url}/api/tags", timeout=5)
+                    if response.status_code == 200:
+                        available_models = [m.get('name') for m in response.json().get('models', []) if m.get('name')]
+                        available_model_map = {m.split(':')[0]: m for m in available_models}
+                        if not available_models:
+                            raise Exception("Still no models available after pulling codellama")
+                    logging.info(f"Available Ollama models: {available_models}")
             else:
                 raise Exception(f"Failed to get models list: {response.status_code}")
         except Exception as e:

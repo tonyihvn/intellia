@@ -2,9 +2,16 @@ from flask import Blueprint, render_template, request, jsonify, current_app
 import json
 import os
 import requests
+from dotenv import load_dotenv, find_dotenv, set_key
 from werkzeug.utils import secure_filename
 from ..config import Config
 from ..llm.client import LLMClient
+
+# Load environment variables
+env_path = find_dotenv()
+if not env_path:
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+load_dotenv(env_path)
 
 settings_routes = Blueprint('settings', __name__, url_prefix='/api')
 
@@ -81,6 +88,22 @@ def handle_llm_config():
         
         config['providers'][provider].update(provider_config)
         
+        # Save API key to environment file if provided
+        if 'api_key' in provider_config and provider_config['api_key']:
+            env_var_name = f"{provider.upper()}_API_KEY"
+            try:
+                # Ensure .env file exists
+                if not os.path.exists(env_path):
+                    with open(env_path, 'w') as f:
+                        f.write('# Environment Variables\n')
+                        
+                # Update .env file
+                set_key(env_path, env_var_name, provider_config['api_key'])
+                os.environ[env_var_name] = provider_config['api_key']  # Update current environment
+                print(f"Updated {env_var_name} in .env file")
+            except Exception as e:
+                print(f"Error updating environment variable: {str(e)}")
+        
         # Save the updated config
         if Config.save_llm_config(config):
             return jsonify({
@@ -98,17 +121,24 @@ def handle_llm_config():
 def manage_providers():
     """Get or set provider enable flags and priority order."""
     if request.method == 'GET':
+        # Ensure environment variables are loaded
+        load_dotenv()
+        
         cfg = Config.get_llm_config()
         providers = cfg.get('providers', {})
         # Normalize shape with enabled and priority
         out = {}
         for name, p in providers.items():
+            # Check environment variable first for API key
+            env_api_key = os.getenv(f"{name.upper()}_API_KEY", '')
+            api_key = env_api_key or p.get('api_key', '')
+            
             out[name] = {
-                'enabled': p.get('enabled', True if p.get('api_key') else False),
+                'enabled': p.get('enabled', True if api_key else False),
                 'priority': p.get('priority', 99),
                 'model': p.get('model', ''),
                 'api_url': p.get('api_url', ''),
-                'api_key': p.get('api_key', '')
+                'api_key': api_key
             }
         return jsonify(out)
 

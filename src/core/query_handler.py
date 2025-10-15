@@ -23,12 +23,13 @@ class QueryHandler:
         self.llm_client = llm_client 
         self.query_enhancer = query_enhancer
 
-    def handle_query(self, question):
+    def handle_query(self, question, execute=True):
         """
-        Handle a natural language question by generating and executing SQL.
+        Handle a natural language question by generating and optionally executing SQL.
         
         Args:
             question: The natural language question to process
+            execute: Whether to execute the generated SQL
             
         Returns:
             Dictionary containing results and metadata
@@ -37,31 +38,23 @@ class QueryHandler:
         logging.info(f"Original question: {question}")
         try:
             # Generate SQL from natural language
-            sql = self.generate_sql(question)
-            if not sql:
+            response = self.generate_sql(question)
+            if not response or not response.get('sql'):
                 raise Exception("Failed to generate SQL query")
 
-            # Execute the generated SQL
-            results = self.execute_sql(sql)
-
-            # Ask LLM to summarize/format results per the question intent
-            try:
-                render_prompt = (
-                    "You are a data analyst. Given the user's request and a JSON result set, "
-                    "produce a concise, human-friendly summary or formatted output. Keep it short.\n\n"
-                    f"Request: {question}\n"
-                    f"Result JSON: {results[:20]}"  # limit size to avoid large prompts
-                )
-                rendered = self.llm_client._try_cloud_generation(render_prompt)
-            except Exception:
-                rendered = ""
-
-            return {
-                "sql": sql,
-                "results": results,
-                "rendered": rendered
+            result = {
+                'sql': response['sql'],
+                'explanation': response.get('explanation', ''),
+                'full_response': response.get('full_response', '')
             }
 
+            # Execute the SQL if requested
+            if execute:
+                results = self.execute_sql(response['sql'])
+                result['results'] = results
+                
+            return result
+            
         except Exception as e:
             raise Exception(f"Error handling query: {str(e)}")
 

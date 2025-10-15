@@ -3,6 +3,9 @@
 import os
 import json
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
     # Get the configuration directory
@@ -91,6 +94,9 @@ class Config:
         """Get LLM configuration with providers nested under a 'providers' key."""
         config = {'providers': {}}
         
+        # Refresh environment variables
+        load_dotenv()
+        
         try:
             # Start with defaults for all providers
             config['providers'] = cls.LLM_PROVIDERS.copy()
@@ -161,49 +167,49 @@ class Config:
     LLM_PROVIDERS = {
         'openai': {
             'priority': 1,
-            'api_key': os.getenv('OPENAI_API_KEY', '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'),
+            'api_key': os.getenv('OPENAI_API_KEY'),
             'api_url': 'https://api.openai.com/v1/chat/completions',
             'model': 'gpt-3.5-turbo'
         },
         'google': {
             'priority': 2,
-            'api_key': os.getenv('GOOGLE_API_KEY', 'AIzaSyBW8dr6QtmWRzfPn3M5bUrRWMgQLEN80p4'),
+            'api_key': os.getenv('GOOGLE_API_KEY'),
             'api_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
             'model': 'gemini-2.0-flash'
         },        
         'vertex': {
             'priority': 3,
-            'api_key': os.getenv('VERTEX_API_KEY', ''),
+            'api_key': os.getenv('VERTEX_API_KEY'),
             'api_url': os.getenv('VERTEX_API_URL', 'https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT/locations/LOCATION/publishers/google/models/gemini-1.5-flash:streamGenerateContent'),
             'model': os.getenv('VERTEX_MODEL', 'gemini-1.5-flash')
         },
         'anthropic': {
             'priority': 4,
-            'api_key': os.getenv('ANTHROPIC_API_KEY', ''),
+            'api_key': os.getenv('ANTHROPIC_API_KEY'),
             'api_url': 'https://api.anthropic.com/v1/messages',
             'model': 'claude-3-opus-20240229'
         },
         'openrouter': {
             'priority': 5,
-            'api_key': os.getenv('OPENROUTER_API_KEY', ''),
+            'api_key': os.getenv('OPENROUTER_API_KEY'),
             'api_url': 'https://openrouter.ai/api/v1/chat/completions',
             'model': os.getenv('OPENROUTER_MODEL', 'openrouter/auto')
         },
         'cohere': {
             'priority': 6,
-            'api_key': os.getenv('COHERE_API_KEY', ''),
+            'api_key': os.getenv('COHERE_API_KEY'),
             'api_url': 'https://api.cohere.ai/v1/chat',
             'model': os.getenv('COHERE_MODEL', 'command-r')
         },
         'grok': {
             'priority': 7,
-            'api_key': os.getenv('GROK_API_KEY', ''),
+            'api_key': os.getenv('GROK_API_KEY'),
             'api_url': 'https://api.x.ai/v1/chat/completions',
             'model': os.getenv('GROK_MODEL', 'grok-beta')
         },
         'github': {
             'priority': 8,
-            'api_key': os.getenv('GITHUB_MODELS_API_KEY', ''),
+            'api_key': os.getenv('GITHUB_MODELS_API_KEY'),
             'api_url': 'https://models.inference.ai.azure.com/chat/completions',
             'model': os.getenv('GITHUB_MODEL', 'gpt-4o-mini')
         },
@@ -275,4 +281,4 @@ class Config:
             json.dump(config, f, indent=4)
 
     # Flask configuration
-    SECRET_KEY = os.getenv('SECRET_KEY', 'your_secret_key_here')
+    SECRET_KEY = os.getenv('SECRET_KEY')
