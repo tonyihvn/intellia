@@ -148,17 +148,27 @@ def manage_providers():
         return jsonify({'error': 'providers object required'}), 400
 
     cfg = Config.get_llm_config()
+    changed = False
     for name, p in data['providers'].items():
         if name not in cfg['providers']:
             continue
         if 'enabled' in p:
             cfg['providers'][name]['enabled'] = bool(p['enabled'])
+            changed = True
         if 'priority' in p:
             cfg['providers'][name]['priority'] = int(p['priority'])
+            changed = True
         if 'api_key' in p:
             cfg['providers'][name]['api_key'] = p['api_key']
+            # Also update environment variable
+            env_var_name = f"{name.upper()}_API_KEY"
+            if os.path.exists(env_path):
+                set_key(env_path, env_var_name, p['api_key'])
+                os.environ[env_var_name] = p['api_key']
+            changed = True
         if 'model' in p:
             cfg['providers'][name]['model'] = p['model']
+            changed = True
 
     ok = Config.save_llm_config(cfg)
     if ok:
@@ -326,24 +336,50 @@ def handle_sources():
         sources = config.get('sources', [])
         source_info = {}
         
-        if 'url' in request.form:
-            source_info['url'] = request.form['url']
-        
-        if 'file' in request.files:
-            file = request.files['file']
-            filename = secure_filename(file.filename)
-            upload_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'context_sources')
-            os.makedirs(upload_dir, exist_ok=True)
-            file_path = os.path.join(upload_dir, filename)
-            file.save(file_path)
-            source_info['filename'] = filename
-            source_info['path'] = file_path
-        
-        if source_info and source_info not in sources:
-            sources.append(source_info)
-            save_config('sources', {'sources': sources})
+        # Handle both form data and JSON
+        if request.is_json:
+            data = request.get_json()
+            if data.get('url'):
+                source_info['url'] = data['url']
+                source_info['type'] = 'url'
+        else:
+            if 'url' in request.form:
+                source_info['url'] = request.form['url']
+                source_info['type'] = 'url'
             
-        return jsonify({'success': True, 'source': source_info})
+            if 'file' in request.files:
+                file = request.files['file']
+                if file.filename:
+                    filename = secure_filename(file.filename)
+                    upload_dir = os.path.join(current_app.static_folder, 'uploads', 'context_sources')
+                    os.makedirs(upload_dir, exist_ok=True)
+                    file_path = os.path.join(upload_dir, filename)
+                    file.save(file_path)
+                    source_info['filename'] = filename
+                    source_info['path'] = file_path
+                    source_info['type'] = 'file'
+        
+        # Validate source info
+        if not source_info:
+            return jsonify({'error': 'No valid source provided'}), 400
+            
+        # Check for duplicates
+        is_duplicate = False
+        for existing in sources:
+            if (('url' in source_info and source_info['url'] == existing.get('url')) or
+                ('filename' in source_info and source_info['filename'] == existing.get('filename'))):
+                is_duplicate = True
+                break
+                
+        if not is_duplicate:
+            sources.append(source_info)
+            try:
+                save_config('sources', {'sources': sources})
+                return jsonify({'success': True, 'source': source_info})
+            except Exception as e:
+                return jsonify({'error': f'Failed to save source: {str(e)}'}), 500
+        else:
+            return jsonify({'error': 'Source already exists'}), 400
     
     elif request.method == 'DELETE':
         data = request.get_json()

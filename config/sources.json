@@ -14,6 +14,10 @@
         },
         {
             "url": "https://openmrs.atlassian.net/wiki/spaces/docs/pages/25467029/Obs"
+        },
+        {
+            "url": "https://guide.openmrs.org/getting-started/openmrs-information-model/",
+            "type": "url"
         }
     ]
 }

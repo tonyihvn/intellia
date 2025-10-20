@@ -3,6 +3,8 @@ from .web.routes import main_routes
 from .web.views import view_routes
 from .web.settings_routes import settings_routes
 from .web.rag_routes import rag_routes
+from .web.schedules_routes import schedules_routes
+from .scheduler.scheduler import get_scheduler
 import os
 
 from .db.connection import get_db_connection
@@ -45,6 +47,14 @@ def create_app():
     app.register_blueprint(main_routes)  # API endpoints
     app.register_blueprint(settings_routes)  # Settings API routes
     app.register_blueprint(rag_routes)  # RAG API routes
+    app.register_blueprint(schedules_routes)  # Scheduler API routes
+
+    # Initialize scheduler manager (runs in background)
+    try:
+        get_scheduler()
+        logging.info("Scheduler initialized")
+    except Exception as e:
+        logging.warning(f"Failed to initialize scheduler: {e}")
     
     # Try to connect to database (but don't fail if connection fails)
     try:

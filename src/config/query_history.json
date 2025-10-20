@@ -1,14 +1,14 @@
 [
   {
-    "id": "95e179c3-a397-4a28-85ba-689ef3268272",
-    "timestamp": "2025-10-15T17:06:06.101117",
+    "id": "cf3e350a-993d-4ac9-b756-9c73035e4625",
+    "timestamp": "2025-10-15T17:40:36.971817",
     "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
     "status": "error",
     "error": "Error handling query: 'str' object has no attribute 'get'"
   },
   {
-    "id": "2ccc39e3-fc92-41d5-b9f7-78f80ddc8bab",
-    "timestamp": "2025-10-15T17:05:52.279896",
+    "id": "0880adae-ad65-40cf-94bf-04f66ce6f3a8",
+    "timestamp": "2025-10-15T17:38:31.147529",
     "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
     "status": "error",
     "error": "Error handling query: 'str' object has no attribute 'get'"
@@ -21,25 +21,11 @@
     "error": "Error handling query: cannot access local variable 'cloud_candidates' where it is not associated with a value"
   },
   {
-    "id": "3a9800c6-d86b-4e19-ae5f-dc8eebd0a0e1",
-    "timestamp": "2025-10-15T16:07:53.681007",
-    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
-    "status": "error",
-    "error": "Error handling query: cannot access local variable 'cloud_candidates' where it is not associated with a value"
-  },
-  {
     "id": "c84abdc8-bf93-41ba-9f08-65fe4156bd76",
     "timestamp": "2025-10-15T16:02:31.640393",
     "question": "Get all patients limit 200, add the enrolled program",
     "status": "error",
     "error": "Error handling query: Error executing query: 1146 (42S02): Table 'openmrsmcp.concepts' doesn't exist"
-  },
-  {
-    "id": "51f4de98-82a8-4c96-b8c7-dec4fcb016bd",
-    "timestamp": "2025-10-15T15:56:09.435180",
-    "question": "Get all patients limit 200",
-    "sql": "SELECT * FROM patient LIMIT 200;",
-    "status": "success"
   },
   {
     "id": "582495a1-d580-46d7-a7bf-c8c8db6ab96c",

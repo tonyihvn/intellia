@@ -63,58 +63,26 @@ class LLMClient:
                 self.model_name = self.local_models[0]
             return
             
-        # Check if any cloud providers are properly configured (enabled + api key), sorted by priority
-        self.available_cloud_providers = []
-        cloud_candidates = []
-        for name, cfg in self.providers.items():
-            if name == 'local':
-                continue
-            if not isinstance(cfg, dict):
-                continue
-            # Skip if no api_key and not local provider
-            if name != 'local' and (not cfg.get('api_key') or not str(cfg.get('api_key')).strip()):
-                logging.warning(f"Provider {name} skipped: No API key configured")
-                continue
-                
-            # Skip if explicitly disabled
-            if cfg.get('enabled') is False:
-                logging.warning(f"Provider {name} skipped: Disabled in config")
-                continue
-                
-            # Skip if no model configured (except local which gets model from models list)
-            if name != 'local' and (not cfg.get('model') or not str(cfg.get('model')).strip()):
-                logging.warning(f"Provider {name} skipped: No model configured")
-                continue
-                
-            # Use explicit priority or provider-specific defaults
-            priority = cfg.get('priority', 99)
-            if name == 'local':
-                priority = 99  # Always make local highest priority (last resort)
-            cloud_candidates.append((priority, name))
+        # Get available providers, sorted by priority
+        self.available_cloud_providers = self.get_available_providers()
         
-        # Sort by priority and log priorities
-        cloud_candidates.sort(key=lambda x: x[0])
-        for priority, name in cloud_candidates:
-            logging.info(f"Provider {name} priority: {priority}")
-        self.available_cloud_providers = [name for _, name in cloud_candidates]
-        if self.available_cloud_providers:
-            # Set current to top priority cloud
-            self.current_provider = self.available_cloud_providers[0]
-            self.model_name = self.providers[self.current_provider].get('model')
-        
-        # Only check internet if we have configured cloud providers
+        # Set initial provider state
+        self.current_provider = 'local' # Default to local
         if self.available_cloud_providers:
             self.has_internet = self._check_internet_connection()
-            
-            # If we have internet and configured providers, start with cloud
             if self.has_internet:
+                # If there's internet, set the initial provider to the highest priority one
                 self.current_provider = self.available_cloud_providers[0]
                 self.model_name = self.providers[self.current_provider]['model']
                 print(f"Starting with cloud provider: {self.current_provider}")
             else:
-                print("No internet connection detected, using local provider")
+                print("No internet connection detected, will use local provider if available.")
         else:
-            print("No cloud providers configured, using local provider")
+            print("No enabled cloud providers configured, using local provider.")
+
+        # If the default is local, set the model name
+        if self.current_provider == 'local':
+            self.model_name = self.local_models[0] if self.local_models else None
         
         # Check if Ollama is running for local model support
         self._check_ollama_connection()
@@ -185,92 +153,100 @@ class LLMClient:
         
         # Always check internet first
         self.has_internet = self._check_internet_connection()
-        
-        # Build provider list from config (enabled + api_key), sorted by priority
+
+        # Get all configured cloud providers, sorted by priority
+        providers_to_try = []
         if self.has_internet:
-            cloud_candidates = []
-            for name, cfg in self.providers.items():
-                if name == 'local':
-                    continue
-                if not isinstance(cfg, dict):
-                    continue
-                if not cfg.get('api_key') or not str(cfg.get('api_key')).strip():
-                    continue
-                if cfg.get('enabled') is False:
-                    continue
-                cloud_candidates.append((cfg.get('priority', 99), name))
-            cloud_candidates.sort(key=lambda x: x[0])
-            for _, name in cloud_candidates:
-                providers_to_try.append(name)
-                logging.info(f"Added cloud provider to try: {name} (priority: {cfg.get('priority', 99)})")
-            
-            if providers_to_try:
-                logging.info(f"Will try cloud providers in order: {providers_to_try}")
+            cloud_providers = self.get_available_providers()
+            if cloud_providers:
+                providers_to_try.extend(cloud_providers)
+                logging.info(f"Cloud providers to try, in order: {providers_to_try}")
             else:
-                logging.warning("No cloud providers properly configured")
+                logging.warning("No enabled cloud providers with models configured.")
         else:
-            logging.warning("No internet connection for cloud providers")
-        
-        # Always add local as last resort with highest priority
-        if 'local' not in providers_to_try:
-            if self._check_ollama_connection():
-                local_cfg = self.providers.get('local', {})
-                local_cfg['priority'] = 99  # Ensure local is last
-                cloud_candidates.append((local_cfg.get('priority', 99), 'local'))
-                cloud_candidates.sort(key=lambda x: x[0])  # Re-sort with local
-                providers_to_try = [name for _, name in cloud_candidates]
+            logging.warning("No internet connection, skipping cloud providers.")
+
+        # Add local as a fallback if Ollama is running
+        if self._check_ollama_connection():
+            if 'local' not in providers_to_try:
+                providers_to_try.append('local')
+        else:
+            logging.warning("Ollama is not running, local provider is unavailable.")
                 
         logging.info(f"Final provider order: {providers_to_try}")
         
+        # If no providers are available at all, raise an error
+        if not providers_to_try:
+            raise Exception("No providers available. Check your internet connection, configuration, and ensure Ollama is running for local fallback.")
+
         # Try each provider in sequence
         for i, provider in enumerate(providers_to_try):
             is_last_provider = i == len(providers_to_try) - 1
             
             try:
                 self.current_provider = provider
-                self.model_name = (self.providers[provider]['model'] if provider != 'local' 
-                                else (self.models[0] if self.models else 'codellama'))
+                self.model_name = (self.providers[provider].get('model') if provider != 'local' 
+                                else (self.local_models[0] if self.local_models else 'codellama'))
                 
+                logging.info(f"Attempting generation with provider: {provider}")
+
                 if provider == 'local':
-                    if not is_last_provider:
-                        logging.warning("Skipping local provider - cloud providers still available")
-                        continue
-                    logging.info("Attempting local generation as last resort...")
+                    # Try local generation
                     return self._try_local_generation(prompt)
-                    
-                # Try cloud provider
-                logging.info(f"Attempting generation with cloud provider: {provider}")
-                try:
+                else:
+                    # Try cloud generation
                     result = self._try_cloud_generation(prompt)
                     logging.info(f"Successfully generated SQL with {provider}")
                     return result
-                except Exception as cloud_error:
-                    error_str = str(cloud_error)
-                    if "403" in error_str or "401" in error_str:
-                        logging.error(f"❌ Authentication failed for {provider}")
-                        if provider == "google":
-                            logging.error("   Hint: Check Google API key permissions")
-                        elif provider == "openai":
-                            logging.error("   Hint: Verify OpenAI API key and credits")
-                    elif "429" in error_str:
-                        logging.warning(f"⚠️ Rate limit hit for {provider}")
-                    else:
-                        logging.error(f"❌ Error with {provider}: {error_str}")
-                    
-                    if not is_last_provider:
-                        logging.info(f"Trying next provider...")
-                        continue
-                    raise  # Re-raise if this is the last provider
                     
             except Exception as e:
                 error_msg = f"Provider {provider} failed: {str(e)}"
-                print(error_msg)
                 errors.append(error_msg)
-                continue
+                logging.error(error_msg)
+                
+                if not is_last_provider:
+                    next_provider = providers_to_try[i+1]
+                    logging.info(f"Trying next provider: {next_provider}")
+                    continue
+                else:
+                    # This was the last provider
+                    logging.error("All providers failed.")
+                    raise Exception(f"All providers failed:\n" + "\n".join(errors))
         
-        # If we get here, all providers failed
-        error_details = "\n".join(errors)
-        raise Exception(f"Failed to generate SQL with all providers:\n{error_details}")
+        # This part should not be reached if there is at least one provider
+        raise Exception(f"Failed to generate SQL with all providers:\n" + "\n".join(errors))
+
+    def get_available_providers(self):
+        """
+        Returns a list of available cloud provider names, sorted by priority.
+        A provider is available if it's not 'local', is a dictionary, is not explicitly
+        disabled, and has a model configured.
+        """
+        cloud_candidates = []
+        for name, cfg in self.providers.items():
+            if name == 'local' or not isinstance(cfg, dict):
+                continue
+
+            # A provider is considered enabled if 'enabled' is not explicitly set to False.
+            if cfg.get('enabled') is False:
+                logging.info(f"Provider {name} skipped: Explicitly disabled in config.")
+                continue
+
+            model = cfg.get('model', '').strip()
+            if not model:
+                logging.info(f"Provider {name} skipped: No model configured.")
+                continue
+            
+            # If we reach here, the provider is a candidate.
+            priority = cfg.get('priority', 99)
+            cloud_candidates.append((priority, name))
+        
+        # Sort by priority (lower number is higher priority)
+        cloud_candidates.sort(key=lambda x: x[0])
+        
+        available = [name for _, name in cloud_candidates]
+        logging.info(f"Available cloud providers, sorted by priority: {available}")
+        return available
 
     def _extract_sql(self, text):
         """Extract likely SQL from mixed text (comments, markdown, explanations).
@@ -377,16 +353,21 @@ class LLMClient:
 
                 try:
                     # Use configured API URL directly for all providers
+                    # Get provider-specific timeout or use default
+                    timeout = config.get('timeout', 30)  # Default 30s timeout for cloud providers
+                    
                     response = requests.post(
                         config['api_url'],
                         headers=headers, 
                         json=payload,
-                        timeout=10)
+                        timeout=timeout
+                    )
                     
                     if response.status_code == 429:  # Rate limit error
-                        last_error = "Rate limit exceeded"
-                        # Backoff before next retry
-                        time.sleep(delay * (2 ** attempt))
+                        last_error = f"{self.current_provider} rate limit exceeded"
+                        logging.warning(f"Rate limit hit for {self.current_provider}")
+                        time.sleep(delay * (2 ** attempt))  # Exponential backoff
+                        continue
                         continue
                     
                     response.raise_for_status()
@@ -518,12 +499,22 @@ class LLMClient:
                 ollama_model_name = available_model_map[base_model_name]
 
             if not ollama_model_name:
-                print(f"Model '{model_to_try}' not available in Ollama, skipping.")
-                continue
+                logging.warning(f"Model '{model_to_try}' not available in Ollama, attempting to pull...")
+                try:
+                    self._ensure_model_available(base_model_name)
+                    # If successful, update the model name
+                    ollama_model_name = base_model_name
+                except Exception as e:
+                    logging.error(f"Failed to pull model {base_model_name}: {str(e)}")
+                    continue
                 
             # Try to generate with current model
             try:
                 print(f"Trying generation with model: {ollama_model_name}")
+                # Get local provider timeout from config
+                local_timeout = self.providers['local'].get('timeout', 120)  # Default 2 minutes for local
+                logging.info(f"Using {local_timeout}s timeout for local generation")
+                
                 response = requests.post(
                     f"{ollama_url}/api/generate",
                     json={
@@ -533,7 +524,7 @@ class LLMClient:
                         "temperature": 0.1,
                         "stop": [";", "\n\n"]
                     },
-                    timeout=60 # Increased timeout
+                    timeout=local_timeout
                 )
                 
                 if response.status_code == 200:

@@ -148,6 +148,38 @@
 
     <div class="container">
         <h1>Database Knowledge Management</h1>
+        
+        <!-- Scheduler Section -->
+        <div class="section">
+            <h2>Schedules</h2>
+            <div class="form-group">
+                <label for="nl-schedule">Create schedule (natural language):</label>
+                <input type="text" id="nl-schedule" class="form-control" placeholder="e.g. Send an email every Monday at 09:00 to team@example.com with subject 'Weekly Report'">
+            </div>
+            <div class="form-group">
+                <button class="btn btn-primary" onclick="parseSchedule()">Parse</button>
+                <button class="btn btn-primary" onclick="createScheduleFromNL()">Create Schedule</button>
+                <button class="btn" onclick="listSchedules()">List Schedules</button>
+            </div>
+            <div id="schedule-parse-result" style="margin-top:10px"></div>
+            <div id="schedules-list" style="margin-top:10px"></div>
+        </div>
+        <!-- External Sources Section -->
+        <div class="section">
+            <h2>External Context Sources</h2>
+            <div class="form-group">
+                <label for="sourceUrl">Add Source URL:</label>
+                <div class="input-group">
+                    <input type="text" id="sourceUrl" class="form-control" placeholder="Enter source URL">
+                    <div class="input-group-append">
+                        <button class="btn btn-primary" onclick="addSource()">Add Source</button>
+                    </div>
+                </div>
+            </div>
+            <div id="sources-list" class="mt-3">
+                <!-- Sources will be listed here -->
+            </div>
+        </div>
 
         <div class="tab-container">
             <button class="tab active" onclick="switchTab('add')">Add Knowledge</button>
@@ -225,9 +257,64 @@
     </div>
 
     <script>
-        // Load all knowledge when page loads
-        document.addEventListener('DOMContentLoaded', loadKnowledge);
+        // Load all knowledge and sources when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            loadKnowledge();
+            loadSources();
+        });
 
+        async function loadSources() {
+            try {
+                const response = await fetch('/api/rag/sources');
+                const data = await response.json();
+                const sourcesList = document.getElementById('sources-list');
+                
+                if (data.sources && data.sources.length > 0) {
+                    const sourceItems = data.sources.map(source => `
+                        <div class="alert alert-info">
+                            <i class="fas fa-link"></i> ${source.url}
+                        </div>
+                    `).join('');
+                    sourcesList.innerHTML = sourceItems;
+                } else {
+                    sourcesList.innerHTML = '<div class="alert alert-light">No external sources added yet.</div>';
+                }
+            } catch (error) {
+                console.error('Error loading sources:', error);
+                document.getElementById('sources-list').innerHTML = 
+                    '<div class="alert alert-danger">Error loading sources.</div>';
+            }
+        }
+        
+        async function addSource() {
+            const sourceUrl = document.getElementById('sourceUrl').value.trim();
+            if (!sourceUrl) {
+                alert('Please enter a source URL');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/rag/sources', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url: sourceUrl })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('sourceUrl').value = '';
+                    await loadSources();  // Reload the sources list
+                } else {
+                    const error = await response.json();
+                    alert(error.message || 'Failed to add source');
+                }
+            } catch (error) {
+                console.error('Error adding source:', error);
+                alert('Error adding source. Please try again.');
+            }
+        }
+        
         function switchTab(tabName) {
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => {
@@ -245,6 +332,16 @@
 
             if (tabName === 'view') {
                 loadKnowledge();
+            }
+
+            // If moving away from add tab, clear any error states
+            if (tabName !== 'add') {
+                document.querySelectorAll('.error-message').forEach(elem => elem.remove());
+            }
+
+            // If moving away from add tab, clear the error state
+            if (tabName !== 'add') {
+                document.querySelectorAll('.error-message').forEach(elem => elem.remove());
             }
         }
 
@@ -352,6 +449,68 @@
                     alert('Error adding business rule');
                 }
             });
+        }
+
+        // Scheduler client functions
+        async function parseSchedule() {
+            const prompt = document.getElementById('nl-schedule').value.trim();
+            if (!prompt) { alert('Enter a natural language schedule'); return; }
+            const resEl = document.getElementById('schedule-parse-result');
+            resEl.innerText = 'Parsing...';
+            try {
+                const r = await fetch('/api/schedules/parse', {
+                    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({prompt})
+                });
+                const data = await r.json();
+                if (r.ok) {
+                    resEl.innerText = JSON.stringify(data.job_spec, null, 2);
+                } else {
+                    resEl.innerText = 'Parse error: ' + (data.error || JSON.stringify(data));
+                }
+            } catch (e) {
+                resEl.innerText = 'Error parsing schedule: ' + e;
+            }
+        }
+
+        async function createScheduleFromNL() {
+            const prompt = document.getElementById('nl-schedule').value.trim();
+            if (!prompt) { alert('Enter a natural language schedule'); return; }
+            const parseR = await fetch('/api/schedules/parse', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt})});
+            const parseData = await parseR.json();
+            if (!parseR.ok) { alert('Failed to parse: ' + (parseData.error||JSON.stringify(parseData))); return; }
+            const job_spec = parseData.job_spec;
+            const createR = await fetch('/api/schedules', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({job_spec})});
+            const createData = await createR.json();
+            if (createR.ok) {
+                alert('Schedule created: ' + createData.job_id);
+                listSchedules();
+            } else {
+                alert('Failed to create schedule: ' + (createData.error||JSON.stringify(createData)));
+            }
+        }
+
+        async function listSchedules() {
+            const listEl = document.getElementById('schedules-list');
+            listEl.innerText = 'Loading...';
+            try {
+                const r = await fetch('/api/schedules');
+                const data = await r.json();
+                if (r.ok) {
+                    if (data.jobs && data.jobs.length) {
+                        listEl.innerHTML = data.jobs.map(j=> `<pre>${JSON.stringify(j, null, 2)}<button onclick="deleteSchedule('${j.id}')">Delete</button></pre>`).join('');
+                    } else {
+                        listEl.innerText = 'No schedules';
+                    }
+                } else {
+                    listEl.innerText = 'Error listing schedules';
+                }
+            } catch(e){ listEl.innerText = 'Error: '+e }
+        }
+
+        async function deleteSchedule(id) {
+            if (!confirm('Delete schedule '+id+'?')) return;
+            const r = await fetch('/api/schedules/'+encodeURIComponent(id), {method:'DELETE'});
+            if (r.ok) { alert('Deleted'); listSchedules(); } else { alert('Delete failed'); }
         }
     </script>
 {% endblock %}
