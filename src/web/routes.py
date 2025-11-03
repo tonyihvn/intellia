@@ -11,6 +11,7 @@ import logging
 import mysql.connector
 from datetime import datetime
 import uuid
+from ..db.connection import get_db_connection
 
 main_routes = Blueprint('main', __name__, url_prefix='/api')
 
@@ -22,6 +23,27 @@ def get_query_handler():
         # Get LLM configuration and return a ready QueryHandler
         llm_config = Config.get_llm_config()
         rag_manager = RAGManager()
+
+        # Try to set DB context for RAG so schema snippets are available to QueryEnhancer
+        try:
+            conn = get_db_connection()
+            if conn:
+                try:
+                    rag_manager.set_db_context(conn)
+                    # Bootstrap RAG knowledge if empty
+                    if rag_manager.is_empty():
+                        try:
+                            rag_manager.bootstrap_from_db(conn)
+                        except Exception:
+                            logging.warning('Failed to bootstrap RAG from DB during handler init')
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+        except Exception:
+            logging.warning('Could not initialize DB context for RAGManager in request')
+
         query_enhancer = QueryEnhancer(rag_manager)
         query_handler = QueryHandler(LLMClient(), query_enhancer)
         logging.info("Successfully initialized QueryHandler")

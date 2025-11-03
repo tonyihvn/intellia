@@ -12,7 +12,7 @@ import logging
 
 def check_database_connection():
     """Check if database connection can be established"""
-    try:
+    try: 
         conn = get_db_connection()
         if conn:
             conn.close()

@@ -20,6 +20,9 @@ with col2:
                 resp.raise_for_status()
                 preview = resp.json()
                 st.session_state['latest_preview'] = preview
+                # populate editable SQL area if present
+                if preview.get('sql'):
+                    st.session_state['editable_sql'] = preview.get('sql')
             except Exception as e:
                 st.error(f"Failed to generate preview: {e}")
 
@@ -29,8 +32,12 @@ with col2:
             st.warning("No preview available to confirm.")
         else:
             payload = { 'command': query }
-            if preview.get('sql'):
+            # prefer edited SQL in session state
+            if st.session_state.get('editable_sql'):
+                payload['sql'] = st.session_state.get('editable_sql')
+            elif preview.get('sql'):
                 payload['sql'] = preview.get('sql')
+
             if preview.get('action'):
                 payload['action'] = preview.get('action')
             if preview.get('_history_id'):
@@ -41,6 +48,8 @@ with col2:
                 result = resp.json()
                 st.success("Execution result")
                 st.json(result)
+                # refresh history in sidebar
+                st.session_state.pop('latest_preview', None)
             except Exception as e:
                 st.error(f"Execution failed: {e}")
 
@@ -52,8 +61,10 @@ with col1:
     else:
         st.write("Type:", preview.get('type'))
         if preview.get('type') == 'query_preview':
-            st.markdown("**Generated SQL (editable in web UI):**")
-            st.code(preview.get('sql', ''), language='sql')
+            st.markdown("**Generated SQL (editable):**")
+            # allow editing of SQL before confirm
+            editable_sql = st.text_area("Edit SQL before confirm", value=st.session_state.get('editable_sql', preview.get('sql', '')) , height=200)
+            st.session_state['editable_sql'] = editable_sql
             if preview.get('explanation'):
                 st.markdown("**Explanation:**")
                 st.write(preview.get('explanation'))
@@ -65,11 +76,22 @@ with col1:
             st.markdown("**Detected Action:**")
             st.write(preview.get('action'))
             if preview.get('sql'):
-                st.markdown("**SQL used for action (preview):**")
-                st.code(preview.get('sql', ''), language='sql')
+                st.markdown("**SQL used for action (preview, editable):**")
+                editable_sql = st.text_area("Edit SQL before confirm", value=st.session_state.get('editable_sql', preview.get('sql', '')) , height=200)
+                st.session_state['editable_sql'] = editable_sql
             if preview.get('sql_results'):
                 st.markdown("**SQL Preview Results:**")
                 st.write(preview.get('sql_results'))
 
 st.sidebar.title("History")
-st.sidebar.write("Recent actions and queries are available in the web app sidebar.")
+try:
+    resp = requests.get("http://localhost:5000/api/query/history")
+    if resp.status_code == 200:
+        hist = resp.json()
+        if isinstance(hist, list) and hist:
+            for h in hist[:20]:
+                st.sidebar.write(f"- {h.get('command') or h.get('question')} ({h.get('status') or ''})")
+        else:
+            st.sidebar.write("No history yet")
+except Exception:
+    st.sidebar.write("History unavailable")

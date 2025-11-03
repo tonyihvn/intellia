@@ -4,6 +4,23 @@ class SchemaFetcher:
     def __init__(self, db_connection):
         self.connection = db_connection
 
+    def get_tables(self):
+        """Return a list of table dicts: [{'table_name': name}, ...]"""
+        if not self.connection:
+            return []
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SHOW TABLES")
+            rows = cursor.fetchall()
+            # rows may be list of tuples like [(table1,), (table2,)]
+            tables = []
+            for r in rows:
+                name = r[0] if isinstance(r, (list, tuple)) else r
+                tables.append({'table_name': name})
+            return tables
+        finally:
+            cursor.close()
+
     def get_table_columns(self, table_name):
         """Get detailed column information for a table."""
         cursor = self.connection.cursor(dictionary=True)
@@ -157,3 +174,69 @@ class SchemaFetcher:
         prompt_string += "\nBased on this schema, "
         
         return prompt_string
+
+    # Convenience methods expected by SchemaContextManager
+    def get_columns(self):
+        """Return a list of columns as dicts with table_name and column metadata."""
+        if not self.connection:
+            return []
+        cursor = self.connection.cursor(dictionary=True)
+        try:
+            cursor.execute("SHOW TABLES")
+            tables = [t[0] for t in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+        all_columns = []
+        for table in tables:
+            c = None
+            try:
+                c = self.connection.cursor(dictionary=True)
+                c.execute(f"DESCRIBE `{table}`")
+                cols = c.fetchall() or []
+                for col in cols:
+                    entry = {'table_name': table, 'column_name': col.get('Field'), 'type': col.get('Type'), 'key': col.get('Key')}
+                    all_columns.append(entry)
+            finally:
+                if c:
+                    c.close()
+
+        return all_columns
+
+    def get_relationships(self):
+        """Return a list of relationship dicts for foreign keys."""
+        if not self.connection:
+            return []
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SHOW TABLES")
+            tables = [t[0] for t in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+        rels = []
+        for table in tables:
+            c = None
+            try:
+                c = self.connection.cursor()
+                c.execute("""
+                    SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                    WHERE TABLE_NAME = %s
+                      AND REFERENCED_TABLE_NAME IS NOT NULL
+                      AND TABLE_SCHEMA = DATABASE()
+                """, (table,))
+                rows = c.fetchall() or []
+                for row in rows:
+                    # row may be tuple (col, ref_table, ref_col)
+                    rels.append({
+                        'table_name': table,
+                        'column': row[0],
+                        'referenced_table': row[1],
+                        'referenced_column': row[2]
+                    })
+            finally:
+                if c:
+                    c.close()
+
+        return rels

@@ -532,7 +532,12 @@ class LLMClient:
                     if result:
                         sql = self._extract_sql(result)
                         print(f"Successfully generated with {ollama_model_name}")
-                        return sql
+                        # Normalize local response to dict similar to cloud providers
+                        return {
+                            'full_response': result,
+                            'sql': sql,
+                            'explanation': result.replace(sql, '').strip() if sql else ''
+                        }
                 else:
                     print(f"Model {ollama_model_name} failed with status {response.status_code}")
                     

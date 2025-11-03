@@ -4,11 +4,12 @@
 
 {% block extra_css %}
 <style>
-    /* Main Content Styles */
+    /* Main Content Styles - full width layout */
     .main-content {
         padding: 20px;
-        max-width: 1200px;
-        margin: 0 auto;
+        width: 100%;
+        max-width: none;
+        margin: 0;
     }
 
     .command-container {
@@ -16,6 +17,7 @@
         padding: 20px;
         border-radius: 5px;
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        width: 100%;
     }
 
     .command-input {
@@ -65,6 +67,57 @@
         margin-bottom: 10px;
     }
 
+    /* Sidebar: make history a fixed left sidebar and shift main content to the right */
+    .command-row {
+        position: relative;
+    }
+
+    /* History sidebar fixed on the left beneath the navbar */
+    #historyPanel {
+        position: fixed;
+        left: 0;
+        top: 70px;
+        /* space for navbar */
+        width: 260px;
+        height: calc(100vh - 80px);
+        overflow-y: auto;
+        padding: 15px;
+        background: #ffffff;
+        border-right: 1px solid #e9ecef;
+        box-shadow: 2px 0 6px rgba(0, 0, 0, 0.03);
+        z-index: 1000;
+    }
+
+    /* Shift the command container over so it doesn't hide beneath the fixed sidebar */
+    .command-container {
+        margin-left: 300px;
+        /* sidebar width + gap */
+        width: calc(100% - 300px);
+    }
+
+    /* Ensure panels inside the main flow take full width of the content area */
+    #result,
+    #explanationPanel,
+    #sqlPanel {
+        width: 100%;
+    }
+
+    /* Responsive: on small screens make sidebar static and stack above content */
+    @media (max-width: 768px) {
+        #historyPanel {
+            position: static;
+            width: 100%;
+            height: auto;
+            box-shadow: none;
+            border-right: none;
+        }
+
+        .command-container {
+            margin-left: 0;
+            width: 100%;
+        }
+    }
+
     .example-item {
         margin-bottom: 8px;
         cursor: pointer;
@@ -107,21 +160,39 @@
         border: 1px solid #ccc;
         border-radius: 4px;
     }
+
+    /* History item styles: don't bold, delete button hidden until hover */
+    .history-item {
+        padding: 8px 6px;
+        border-bottom: 1px solid #f1f1f1;
+        cursor: pointer;
+    }
+
+    .history-item .item-title {
+        font-weight: 400;
+        /* normal weight */
+    }
+
+    .history-item .delete-btn {
+        opacity: 0;
+        transition: opacity 0.15s ease-in-out;
+    }
+
+    .history-item:hover .delete-btn {
+        opacity: 1;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="main-content">
     <div class="command-container">
-        <header>
-            <h2>OpenMRS Assistant</h2>
-            <p class="text-muted">Ask questions, schedule tasks, or take immediate actions</p>
-        </header>
+
 
         <div class="mb-3">
             <label for="commandInput" class="form-label">What would you like to do?</label>
-            <textarea class="command-input" id="commandInput" rows="4" 
-                placeholder="Examples:
+            <small class="text-muted"><i>Ask questions, schedule tasks, or take immediate actions</i></small>
+            <textarea class="command-input" id="commandInput" rows="4" placeholder="Examples:
 - Show me all patients diagnosed with malaria in the last month
 - Send an email to admin@example.com now with subject 'Daily Report'
 - Every Monday at 9am, send an email to team@example.com about weekly statistics
@@ -130,12 +201,45 @@
 
         <div class="button-group mb-4">
             <button id="submitBtn" class="btn btn-primary">
-                <i class="fas fa-paper-plane"></i> Submit
+                <i class="fas fa-paper-plane"></i> Go
             </button>
         </div>
 
-        <div id="result">
-            <p class="text-muted">Results will appear here after submitting your command.</p>
+        <div class="row command-row">
+            <!-- History on the LEFT -->
+            <div class="col-md-4">
+                <div id="historyPanel" class="mb-3">
+                    <h5 id="historyHeader" style="cursor:pointer">History</h5>
+                    <div id="historyList">Click "History" to load</div>
+                </div>
+            </div>
+
+            <!-- Chat / Results on the RIGHT -->
+            <div class="col-md-12">
+                <div id="result">
+                </div>
+
+                <!-- Explanation row (hidden until Go clicked) -->
+                <div id="explanationPanel" class="mt-3" style="display:none">
+                    <!-- Explanation content will be injected here -->
+                </div>
+
+                <!-- SQL editor row (hidden until Go clicked) -->
+                <div id="sqlPanel" class="mt-3" style="display:none">
+                    <div class="d-flex justify-content-between align-items-center">
+
+                        <div>
+                            <button id="toggleSql" class="btn btn-sm btn-outline-secondary me-2">Show SQL</button>
+                            <button id="executeRawBtn" class="btn btn-sm btn-outline-primary">Execute Raw SQL</button>
+                        </div>
+                    </div>
+                    <textarea id="sqlEditor" style="display:none; width:100%; min-height:150px;" class="mt-2"
+                        placeholder="Generated SQL will appear here"></textarea>
+                    <div class="mt-2">
+                        <button id="confirmBtn" class="btn btn-success" disabled>Confirm (Execute)</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="examples">
@@ -143,10 +247,12 @@
             <div class="example-item" onclick="setCommand('Show me all patients who visited the clinic today')">
                 ➤ Show me all patients who visited the clinic today
             </div>
-            <div class="example-item" onclick="setCommand('Send an email to admin@example.com now with subject \'System Status\' body \'All systems operational\'')">
+            <div class="example-item"
+                onclick="setCommand('Send an email to admin@example.com now with subject \'System Status\' body \'All systems operational\'')">
                 ➤ Send an email to admin@example.com now about system status
             </div>
-            <div class="example-item" onclick="setCommand('Every day at 5pm, send an email to team@example.com with daily patient summary')">
+            <div class="example-item"
+                onclick="setCommand('Every day at 5pm, send an email to team@example.com with daily patient summary')">
                 ➤ Every day at 5pm, send an email to team@example.com with daily patient summary
             </div>
             <div class="example-item" onclick="setCommand('Show me total appointments by department as a chart')">
@@ -160,6 +266,9 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+    // track if user has clicked Go (unlocked panels)
+    window.goClicked = false;
+
     document.getElementById('submitBtn').addEventListener('click', async () => {
         const command = document.getElementById('commandInput').value.trim();
         if (!command) {
@@ -182,6 +291,17 @@
             });
 
             const data = await response.json();
+            // Save latest preview to window so confirm button can use it
+            window.latestPreview = data;
+
+            // Reveal the explanation and SQL panels on first Go click
+            window.goClicked = true;
+            document.getElementById('explanationPanel').style.display = 'block';
+            document.getElementById('sqlPanel').style.display = 'block';
+            // Keep the SQL editor collapsed by default; user expands intentionally
+            document.getElementById('sqlEditor').style.display = 'none';
+            document.getElementById('toggleSql').textContent = 'Show SQL';
+
             displayResult(data);
         } catch (error) {
             console.error('Error:', error);
@@ -192,90 +312,129 @@
         }
     });
 
+    // SQL collapse toggle handler. Editor is collapsed by default; user expands it.
+    document.getElementById('toggleSql').addEventListener('click', () => {
+        const editor = document.getElementById('sqlEditor');
+        const btn = document.getElementById('toggleSql');
+        if (!editor) return;
+        if (editor.style.display === 'none' || editor.style.display === '') {
+            editor.style.display = 'block';
+            btn.textContent = 'Collapse SQL';
+        } else {
+            editor.style.display = 'none';
+            btn.textContent = 'Show SQL';
+        }
+    });
+
+    document.getElementById('confirmBtn').addEventListener('click', async () => {
+        // Confirm requires a preview/history id to execute the previously generated preview
+        const preview = window.latestPreview || {};
+        const historyId = preview._history_id || preview.history_id || null;
+        const editedSql = document.getElementById('sqlEditor').value;
+
+        if (!historyId) {
+            alert('Please generate a preview first (Submit) and ensure you have a preview selected before confirming.');
+            return;
+        }
+
+        const payload = { history_id: historyId, sql: editedSql, command: document.getElementById('commandInput').value };
+
+        try {
+            const resp = await fetch('/api/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const res = await resp.json();
+            if (res.error) {
+                displayError(res.error || 'Execution error');
+            } else {
+                displayResult(res);
+                // refresh history
+                loadHistory();
+            }
+        } catch (e) {
+            console.error(e);
+            displayError('Failed to confirm action.');
+        }
+    });
+
+    document.getElementById('executeRawBtn').addEventListener('click', async () => {
+        const sql = document.getElementById('sqlEditor').value;
+        if (!sql) { alert('No SQL to execute'); return; }
+        try {
+            const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+            const data = await resp.json();
+            displayResult({ type: 'query_result', sql, results: data });
+        } catch (e) {
+            console.error(e);
+            displayError('Failed to execute SQL');
+        }
+    });
+
     function displayResult(data) {
         const resultDiv = document.getElementById('result');
         resultDiv.innerHTML = '';
-
+        if (!data) return;
         if (data.error) {
             displayError(data.error);
             return;
         }
 
-        // Handle different response types
-        switch (data.type) {
-            case 'query_result':
-                displayQueryResult(data);
-                break;
-            case 'action_completed':
-                displaySuccess(data.message);
-                if (data.response) {
-                    displayData(data.response);
-                }
-                break;
-            case 'schedule_created':
-                displaySuccess('Schedule created successfully! ' + (data.message || ''));
-                break;
-            default:
-                displayData(data);
-        }
-    }
-
-    function displayQueryResult(data) {
-        const resultDiv = document.getElementById('result');
-        
-        // If SQL was generated, show it
-        if (data.sql) {
-            const sqlDiv = document.createElement('div');
-            sqlDiv.id = 'generatedSQL';
-            sqlDiv.innerHTML = `
-                <h4>Generated SQL:</h4>
-                <pre><code>${escapeHtml(data.sql)}</code></pre>
-            `;
-            resultDiv.appendChild(sqlDiv);
-        }
-
-        // Show explanation if available
+        // Explanation panel above SQL
+        const explPanel = document.getElementById('explanationPanel');
+        explPanel.innerHTML = '';
         if (data.explanation) {
             const explDiv = document.createElement('div');
             explDiv.className = 'alert alert-info';
             explDiv.textContent = data.explanation;
-            resultDiv.appendChild(explDiv);
+            explPanel.appendChild(explDiv);
         }
 
-        // Display the actual data
+        // Put SQL into the editor (do not change its visibility here)
+        const editor = document.getElementById('sqlEditor');
+        editor.value = data.sql || '';
+
+        // Only enable confirm if Go has been clicked (panels revealed) and preview has a history id
+        const confirmBtn = document.getElementById('confirmBtn');
+        const hasHistoryId = (window.latestPreview && (window.latestPreview._history_id || window.latestPreview.history_id));
+        confirmBtn.disabled = !(window.goClicked && hasHistoryId);
+
+        // Display payload data (if present)
         if (data.data) {
             displayData(data.data);
+            return;
         }
+        if (data.response) {
+            displayData(data.response);
+            return;
+        }
+        if (data.type === 'schedule_created') {
+            displaySuccess('Schedule created successfully! ' + (data.message || ''));
+            return;
+        }
+
+        // Generic fallback: if it's an array, table it; otherwise print text
+        displayData(data);
     }
 
     function displayData(data) {
         const resultDiv = document.getElementById('result');
-        
-        // Check if the command suggests a specific display format
-        const command = document.getElementById('commandInput').value.toLowerCase();
-        const wantsChart = command.includes('chart') || command.includes('graph');
-        const wantsText = command.includes('text');
-
-        if (wantsChart && Array.isArray(data)) {
-            displayChart(data);
+        resultDiv.innerHTML = '';
+        if (!data) return;
+        if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
+            // If first row has numeric values, show chart else table
+            const numericField = Object.keys(data[0]).find(k => typeof data[0][k] === 'number');
+            if (numericField && Object.keys(data[0]).length <= 2) {
+                displayChart(data);
+            } else {
+                displayTable(data);
+            }
             return;
         }
 
-        if (wantsText) {
-            displayTextResult(data);
-            return;
-        }
-
-        // Default to table view for array data
-        if (Array.isArray(data)) {
-            displayTable(data);
-            return;
-        }
-
-        // For other types of data, display as formatted text
-        const pre = document.createElement('pre');
-        pre.textContent = JSON.stringify(data, null, 2);
-        resultDiv.appendChild(pre);
+        // For other types, show as text
+        displayTextResult(data);
     }
 
     function displayChart(data) {
@@ -342,7 +501,7 @@
         const resultDiv = document.getElementById('result');
         const pre = document.createElement('pre');
         if (Array.isArray(data)) {
-            pre.textContent = data.map(row => 
+            pre.textContent = data.map(row =>
                 Object.entries(row)
                     .map(([key, value]) => `${key}: ${value}`)
                     .join(', ')
@@ -379,5 +538,81 @@
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
+
+    async function loadHistory() {
+        const list = document.getElementById('historyList');
+        list.innerHTML = 'Loading...';
+        try {
+            const resp = await fetch('/api/query/history');
+            const data = await resp.json();
+            if (!Array.isArray(data) || data.length === 0) {
+                list.innerHTML = '<div class="text-muted">No history</div>';
+                return;
+            }
+            list.innerHTML = '';
+            data.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'history-item';
+                el.innerHTML = `<div class="item-title">${escapeHtml(item.command || item.question || item.question)}</div>
+                                <div class="small text-muted">${item.timestamp || item.date || ''}</div>`;
+
+                // Delete button (hidden until hover) with confirmation
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    try {
+                        const ok = window.confirm('Delete this history item? This cannot be undone.');
+                        if (!ok) return;
+                        const resp = await fetch('/api/history/' + (item.id || item._history_id || item.history_id), { method: 'DELETE' });
+                        if (!resp.ok) {
+                            console.error('Failed to delete history item', resp.statusText);
+                            displayError('Failed to delete history item');
+                            return;
+                        }
+                        loadHistory();
+                    } catch (e) { console.error(e); displayError('Failed to delete history item'); }
+                });
+
+                el.appendChild(deleteBtn);
+
+                // Click on the history item loads the preview and reveals panels
+                el.addEventListener('click', async () => {
+                    try {
+                        // Load main prompt into command input
+                        const mainText = item.command || item.question || '';
+                        document.getElementById('commandInput').value = mainText;
+
+                        // Save preview and reveal panels so user can inspect/edit
+                        window.latestPreview = item;
+                        window.goClicked = true;
+                        document.getElementById('explanationPanel').style.display = 'block';
+                        document.getElementById('sqlPanel').style.display = 'block';
+                        // Keep SQL editor collapsed by default; user may expand explicitly
+                        document.getElementById('sqlEditor').style.display = 'none';
+                        document.getElementById('toggleSql').textContent = 'Show SQL';
+
+                        // Fill SQL into editor (hidden) and display explanation
+                        document.getElementById('sqlEditor').value = item.sql || '';
+
+                        // Enable confirm if the preview has a server-generated id
+                        const hasHistoryId = (item.id || item._history_id || item.history_id);
+                        document.getElementById('confirmBtn').disabled = !hasHistoryId;
+
+                        displayResult(item);
+                    } catch (e) { console.error(e); }
+                });
+
+                list.appendChild(el);
+            });
+        } catch (e) {
+            console.error(e);
+            list.innerHTML = '<div class="text-danger">Failed to load history</div>';
+        }
+    }
+
+    // Load history on page load
+    loadHistory();
 </script>
 {% endblock %}
