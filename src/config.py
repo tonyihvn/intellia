@@ -208,8 +208,18 @@ class Config:
                     current_config['providers'][provider][key] = value
                     
             # Save merged config
+            # Do not persist sensitive API keys into the saved llm_config.json file.
+            # Keep keys available at runtime via environment variables only.
+            write_config = json.loads(json.dumps(current_config))
+            for prov, settings in write_config.get('providers', {}).items():
+                if 'api_key' in settings:
+                    try:
+                        del settings['api_key']
+                    except Exception:
+                        pass
+
             with open(cls.LLM_CONFIG_FILE, 'w') as f:
-                json.dump(current_config, f, indent=4)
+                json.dump(write_config, f, indent=4)
                 
             return True
             
