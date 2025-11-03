@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 import json
 from sklearn.feature_extraction.text import TfidfVectorizer
+from .schema_context import SchemaContextManager
 
 class SimpleVectorStore:
     def __init__(self, name: str):
@@ -107,7 +108,121 @@ class RAGManager:
         """Initialize RAG manager with simple vector stores for schema and business rules."""
         self.schema_collection = SimpleVectorStore("schema")
         self.business_rules_collection = SimpleVectorStore("business_rules")
+        self.schema_context = None
+    
+    def set_db_context(self, db_connection):
+        """Set up database schema context"""
+        self.schema_context = SchemaContextManager(db_connection)
         
+    def generate_query_context(self, question):
+        """Generate context for query generation"""
+        context = {
+            'question': question,
+            'schema': self.schema_context.get_context() if self.schema_context else None,
+            'relevant_tables': self._find_relevant_tables(question)
+        }
+        return context
+    
+    def _find_relevant_tables(self, question):
+        """Find tables relevant to the question"""
+        if not self.schema_context:
+            return []
+            
+        schema = self.schema_context.get_context()
+        relevant = []
+        
+        # First try semantic search against the schema collection if available
+        try:
+            results = self.schema_collection.query(question, n_results=5)
+            tables_found = []
+            for meta in results.get('metadatas', []):
+                if isinstance(meta, dict) and meta.get('table'):
+                    tname = meta.get('table')
+                    if tname not in tables_found:
+                        tables_found.append(tname)
+            if tables_found:
+                # Build table entries from schema_context for these tables
+                for tname in tables_found:
+                    tbl = next((t for t in schema['tables'] if t.get('table_name') == tname), None)
+                    if tbl:
+                        relevant.append(tbl)
+                return relevant
+        except Exception:
+            # fall back to keyword matching
+            pass
+
+        # Fallback: Simple keyword matching
+        for table in schema.get('tables', []):
+            if table.get('table_name', '').lower() in question.lower():
+                relevant.append(table)
+                # Add related tables through relationships
+                for rel in schema.get('relationships', []):
+                    if rel.get('table_name') == table.get('table_name'):
+                        ref = rel.get('referenced_table')
+                        if ref:
+                            ref_tbl = next((t for t in schema.get('tables', []) if t.get('table_name') == ref), None)
+                            if ref_tbl:
+                                relevant.append(ref_tbl)
+                        
+        return relevant
+
+    def get_schema_snippet_for_question(self, question: str, max_tables: int = 5) -> str:
+        """Return a concise schema snippet (only relevant tables and relationships) for the given question.
+
+        This is optimized to keep the LLM prompt small: only include table names, important columns,
+        and direct relationships for the most relevant tables.
+        """
+        if not self.schema_context:
+            return ""
+
+        schema = self.schema_context.get_context()
+        if not schema:
+            return ""
+
+        # Determine relevant tables using semantic search or fallback
+        table_objs = self._find_relevant_tables(question)
+        # If none found, default to top N tables
+        if not table_objs:
+            table_names = [t.get('table_name') for t in schema.get('tables', [])][:max_tables]
+            table_objs = [t for t in schema.get('tables', []) if t.get('table_name') in table_names]
+
+        # Limit to max_tables
+        table_objs = table_objs[:max_tables]
+
+        parts = []
+        for tbl in table_objs:
+            tname = tbl.get('table_name')
+            parts.append(f"Table: {tname}")
+            # columns
+            cols = [c.get('column_name') or c.get('Field') for c in schema.get('columns', []) if c.get('table_name') == tname]
+            if not cols:
+                # try to get detailed table info from schema_context
+                info = self.schema_context.get_table_info(tname)
+                if info and info.get('columns'):
+                    cols = [c.get('Field') for c in info.get('columns')]
+            if cols:
+                parts.append("  Columns: " + ", ".join(cols[:20]))
+
+            # relationships
+            rels = [r for r in schema.get('relationships', []) if r.get('table_name') == tname or r.get('referenced_table') == tname]
+            if not rels:
+                info = self.schema_context.get_table_info(tname)
+                if info and info.get('relationships'):
+                    rels = info.get('relationships')
+            if rels:
+                # format relationships concisely
+                rel_lines = []
+                for r in rels:
+                    if isinstance(r, dict):
+                        rel_lines.append(f"{r.get('column')} -> {r.get('referenced_table')}.{r.get('referenced_column')}")
+                    else:
+                        # assume string
+                        rel_lines.append(str(r))
+                parts.append("  Relationships: " + "; ".join(rel_lines[:10]))
+
+        snippet = "\n".join(parts)
+        return snippet
+
     def add_schema_knowledge(self, descriptions: List[Dict[str, str]]):
         """Add schema-related knowledge to the vector store.
         

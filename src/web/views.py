@@ -5,7 +5,7 @@ view_routes = Blueprint('views', __name__)
 
 @view_routes.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('command.html')
 
 @view_routes.route('/settings')
 def settings():

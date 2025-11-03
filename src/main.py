@@ -1,13 +1,13 @@
 from flask import Flask
-from .web.routes import main_routes
-from .web.views import view_routes
-from .web.settings_routes import settings_routes
-from .web.rag_routes import rag_routes
-from .web.schedules_routes import schedules_routes
-from .scheduler.scheduler import get_scheduler
+from src.web.routes import main_routes
+from src.web.views import view_routes
+from src.web.settings_routes import settings_routes
+from src.web.rag_routes import rag_routes
+from src.web.schedules_routes import schedules_routes
+from src.scheduler.scheduler import get_scheduler
+from src.db.connection import get_db_connection
+from src.rag.manager import RAGManager
 import os
-
-from .db.connection import get_db_connection
 import logging
 
 def check_database_connection():
@@ -56,27 +56,24 @@ def create_app():
     except Exception as e:
         logging.warning(f"Failed to initialize scheduler: {e}")
     
-    # Try to connect to database (but don't fail if connection fails)
+    # Initialize RAG with database context
     try:
         if check_database_connection():
             logging.info("Successfully connected to database")
-            # Bootstrap RAG knowledge if empty
-            try:
-                from .rag.manager import RAGManager
+            conn = get_db_connection()
+            if conn:
                 rm = RAGManager()
+                # Set database context
+                rm.set_db_context(conn)
+                
+                # Bootstrap if empty
                 if rm.is_empty():
-                    conn = get_db_connection()
-                    if conn:
-                        ok = rm.bootstrap_from_db(conn)
-                        if ok:
-                            logging.info("RAG knowledge bootstrapped from database schema")
-                        conn.close()
-            except Exception as e:
-                logging.warning(f"RAG bootstrap skipped: {str(e)}")
-        else:
-            logging.warning("Could not connect to database. Please check your database configuration.")
+                    ok = rm.bootstrap_from_db(conn)
+                    if ok:
+                        logging.info("RAG knowledge bootstrapped from database schema")
+                conn.close()
     except Exception as e:
-        logging.error(f"Error checking database connection: {str(e)}")
+        logging.error(f"Error initializing RAG with database context: {str(e)}")
     
     return app
 

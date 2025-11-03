@@ -1,0 +1,26 @@
+{
+  "providers": {
+    "openai": {
+      "priority": 1,
+      "api_key": "", 
+      "api_url": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-3.5-turbo",
+      "enabled": true,
+      "timeout": 30
+    },
+    "google": {
+      "priority": 2,
+      "api_key": "",
+      "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      "model": "gemini-2.0-flash",
+      "enabled": true,
+      "timeout": 30
+    },
+    "local": {
+      "priority": 99,
+      "models": ["codellama", "llama3", "deepseek-coder"],
+      "api_url": "http://localhost:11434",
+      "enabled": true
+    }
+  }
+}

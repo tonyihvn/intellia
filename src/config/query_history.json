@@ -1,37 +1,69 @@
 [
   {
-    "id": "cf3e350a-993d-4ac9-b756-9c73035e4625",
-    "timestamp": "2025-10-15T17:40:36.971817",
-    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
-    "status": "error",
-    "error": "Error handling query: 'str' object has no attribute 'get'"
+    "id": "aa6eb5f8-d8eb-415e-ba29-7f8aebdd696d",
+    "timestamp": "2025-11-02T15:46:28.694318",
+    "command": "count patients. note some patient does not have obs record",
+    "type": "query_preview",
+    "sql": "SELECT COUNT(DISTINCT person_id) AS patient_count\nFROM obs;",
+    "explanation": "```sql\n-- Count the number of distinct patients.\n-- This query assumes that patient information is stored in the obs table and that patient_id is a column in that table.\n-- It accounts for the possibility that some patients may not have any records in the obs table.\n\n```",
+    "status": "preview",
+    "error": null
   },
   {
-    "id": "0880adae-ad65-40cf-94bf-04f66ce6f3a8",
-    "timestamp": "2025-10-15T17:38:31.147529",
-    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
-    "status": "error",
-    "error": "Error handling query: 'str' object has no attribute 'get'"
+    "id": "3f4bebea-2870-4bc9-9270-4000688d9fa4",
+    "timestamp": "2025-11-02T15:43:57.706271",
+    "command": "count patients",
+    "type": "query_preview",
+    "sql": "SELECT COUNT(DISTINCT person_id) AS patient_count\nFROM obs;",
+    "explanation": "```sql\n-- Count the number of distinct patients in the obs table.\n-- Assuming each row in the obs table represents an observation for a patient.\n\n```",
+    "status": "preview",
+    "error": null
   },
   {
-    "id": "20839cf8-dcbd-47ec-af9b-56195f738ef2",
-    "timestamp": "2025-10-15T16:08:20.879096",
-    "question": "Get all patients, limit 200, and add the enrolled program. Also show the data is a bar chart columns by month of the date_created",
+    "id": "a499ef3b-6022-4709-9153-0ee5b3c034a2",
+    "timestamp": "2025-11-02T15:34:47.093294",
+    "command": "Get all the patient's in this facility",
+    "type": "query_preview",
+    "sql": "SELECT p.*  -- Select all columns from the patient table\nFROM patient p\nJOIN patient_facility pf ON p.patient_id = pf.patient_id\nWHERE pf.facility_id = your_facility_id;\n\n-- Explanation:\n-- 1. `SELECT p.*`:  Selects all columns from the `patient` table (aliased as `p`).\n-- 2. `FROM patient p`: Specifies the `patient` table as the primary table in the query.\n-- 3. `JOIN patient_facility pf ON p.patient_id = pf.patient_id`: Joins the `patient` table with a hypothetical `patient_facility` table (aliased as `pf`) based on the `patient_id`.  This assumes a many-to-many relationship between patients and facilities.  If the facility information is directly in the `patient` table, you can skip the JOIN.\n-- 4. `WHERE pf.facility_id = your_facility_id`: Filters the results to include only patients associated with the specified `facility_id`.  Replace `your_facility_id` with the actual ID of the facility.\n\n-- If the facility information is stored directly in the patient table:\n\n-- SELECT *\n-- FROM patient\n-- WHERE facility_id = your_facility_id;",
+    "explanation": "```sql\n-- Assuming there's a way to identify patients within a facility, \n-- and that this information is stored in a table (e.g., 'patient_facility') \n-- or within the 'patient' table itself.  Since the schema context is limited,\n-- I'll make a general query.  You'll likely need to adapt this based on your actual table structure.\n\n-- Replace 'patient' and 'patient_facility' with your actual table names.\n-- Replace 'facility_id' and 'patient_id' with the actual column names that link patients to facilities.\n-- Replace 'your_facility_id' with the actual ID of the facility you're interested in.\n\n\n```",
     "status": "error",
-    "error": "Error handling query: cannot access local variable 'cloud_candidates' where it is not associated with a value"
+    "error": "Error executing query: 1146 (42S02): Table 'openmrs.patient_facility' doesn't exist"
   },
   {
-    "id": "c84abdc8-bf93-41ba-9f08-65fe4156bd76",
-    "timestamp": "2025-10-15T16:02:31.640393",
-    "question": "Get all patients limit 200, add the enrolled program",
+    "id": "e8d0d83a-a52e-4bff-85e5-997855ae292b",
+    "timestamp": "2025-11-02T15:01:57.414389",
+    "command": "List all the Patient Id for me",
+    "type": "query_preview",
+    "sql": "Select the patient_id from the patient table.\nSELECT patient_id\nFROM patient;",
+    "explanation": "```sql\n-- \n```",
     "status": "error",
-    "error": "Error handling query: Error executing query: 1146 (42S02): Table 'openmrsmcp.concepts' doesn't exist"
+    "error": "Error executing query: 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'table.\nSELECT patient_id\nFROM patient' at line 1"
   },
   {
-    "id": "582495a1-d580-46d7-a7bf-c8c8db6ab96c",
-    "timestamp": "2025-10-15T15:07:13.258189",
-    "question": "Count active Patient, display their names, and programs enrolled in a table",
+    "id": "7ab9ccc7-0b4e-4578-b2ae-01f47a54057b",
+    "timestamp": "2025-11-02T14:51:47.173997",
+    "command": "Get list of all the patients in this facility",
+    "type": "query_preview",
+    "sql": "Select all patient IDs from the patient table.\nSELECT patient_id\nFROM patient;",
+    "explanation": "```sql\n-- \n```",
     "status": "error",
-    "error": "Error handling query: Error executing query: 1054 (42S22): Unknown column 'p.name' in 'field list'"
+    "error": "Error executing query: 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'table.\nSELECT patient_id\nFROM patient' at line 1"
+  },
+  {
+    "id": "08dca965-3705-4f84-8afe-0b149cd8b2b7",
+    "timestamp": "2025-11-02T14:28:46.095085",
+    "command": "Display a table of the patients limit 100",
+    "type": "error",
+    "sql": "",
+    "explanation": "",
+    "status": "error",
+    "error": "Error generating SQL: 'dict' object has no attribute 'strip'"
+  },
+  {
+    "id": "037d648f-dad9-4965-ad11-dbd0a49cd748",
+    "timestamp": "2025-11-01T21:37:29.457958",
+    "question": "Display a table of all the patients' names, phone numbers and addresses",
+    "status": "error",
+    "error": "Error handling query: Error generating SQL: All providers failed:\nProvider openai failed: Cloud provider failed after 3 attempts: openai rate limit exceeded"
   }
 ]

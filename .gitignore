@@ -131,3 +131,15 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Local config files that may contain secrets
+src/config/llm_config.json
+src/config/llm_config.local.json
+
+# Ignore compiled files
+src/__pycache__/
+
+# Ignore schedules and vector store (if sensitive)
+config/schedules.json
+vector_store/
+uploads/

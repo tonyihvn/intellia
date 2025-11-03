@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block title %}OpenMRS Assistant{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Main Content Styles */
+    .main-content {
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .command-container {
+        background: #fff;
+        padding: 20px;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .command-input {
+        width: 100%;
+        padding: 10px;
+        margin: 10px 0;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        resize: vertical;
+        min-height: 100px;
+        font-size: 16px;
+    }
+
+    #result {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 5px;
+        background: #f8f9fa;
+        min-height: 100px;
+    }
+
+    .result-table {
+        width: 100%;
+        margin-top: 15px;
+        border-collapse: collapse;
+    }
+
+    .result-table th,
+    .result-table td {
+        padding: 8px;
+        border: 1px solid #dee2e6;
+        text-align: left;
+    }
+
+    .result-table th {
+        background-color: #f8f9fa;
+    }
+
+    .examples {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 5px;
+    }
+
+    .examples h3 {
+        margin-bottom: 10px;
+    }
+
+    .example-item {
+        margin-bottom: 8px;
+        cursor: pointer;
+        color: #0066cc;
+    }
+
+    .example-item:hover {
+        text-decoration: underline;
+    }
+
+    .success-message {
+        padding: 10px;
+        margin: 10px 0;
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 4px;
+        color: #155724;
+    }
+
+    .error-message {
+        padding: 10px;
+        margin: 10px 0;
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 4px;
+        color: #721c24;
+    }
+
+    #generatedSQL {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 5px;
+    }
+
+    #sqlEditor {
+        width: 100%;
+        font-family: monospace;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="command-container">
+        <header>
+            <h2>OpenMRS Assistant</h2>
+            <p class="text-muted">Ask questions, schedule tasks, or take immediate actions</p>
+        </header>
+
+        <div class="mb-3">
+            <label for="commandInput" class="form-label">What would you like to do?</label>
+            <textarea class="command-input" id="commandInput" rows="4" 
+                placeholder="Examples:
+- Show me all patients diagnosed with malaria in the last month
+- Send an email to admin@example.com now with subject 'Daily Report'
+- Every Monday at 9am, send an email to team@example.com about weekly statistics
+- Call API POST https://example.com/api/update now with body {'status': 'active'}"></textarea>
+        </div>
+
+        <div class="button-group mb-4">
+            <button id="submitBtn" class="btn btn-primary">
+                <i class="fas fa-paper-plane"></i> Submit
+            </button>
+        </div>
+
+        <div id="result">
+            <p class="text-muted">Results will appear here after submitting your command.</p>
+        </div>
+
+        <div class="examples">
+            <h3>Example Commands</h3>
+            <div class="example-item" onclick="setCommand('Show me all patients who visited the clinic today')">
+                ➤ Show me all patients who visited the clinic today
+            </div>
+            <div class="example-item" onclick="setCommand('Send an email to admin@example.com now with subject \'System Status\' body \'All systems operational\'')">
+                ➤ Send an email to admin@example.com now about system status
+            </div>
+            <div class="example-item" onclick="setCommand('Every day at 5pm, send an email to team@example.com with daily patient summary')">
+                ➤ Every day at 5pm, send an email to team@example.com with daily patient summary
+            </div>
+            <div class="example-item" onclick="setCommand('Show me total appointments by department as a chart')">
+                ➤ Show me total appointments by department as a chart
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.getElementById('submitBtn').addEventListener('click', async () => {
+        const command = document.getElementById('commandInput').value.trim();
+        if (!command) {
+            alert('Please enter a command.');
+            return;
+        }
+
+        const button = document.getElementById('submitBtn');
+        const originalText = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+        try {
+            const response = await fetch('/api/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ question: command })
+            });
+
+            const data = await response.json();
+            displayResult(data);
+        } catch (error) {
+            console.error('Error:', error);
+            displayError('Error processing your command. Please try again.');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    });
+
+    function displayResult(data) {
+        const resultDiv = document.getElementById('result');
+        resultDiv.innerHTML = '';
+
+        if (data.error) {
+            displayError(data.error);
+            return;
+        }
+
+        // Handle different response types
+        switch (data.type) {
+            case 'query_result':
+                displayQueryResult(data);
+                break;
+            case 'action_completed':
+                displaySuccess(data.message);
+                if (data.response) {
+                    displayData(data.response);
+                }
+                break;
+            case 'schedule_created':
+                displaySuccess('Schedule created successfully! ' + (data.message || ''));
+                break;
+            default:
+                displayData(data);
+        }
+    }
+
+    function displayQueryResult(data) {
+        const resultDiv = document.getElementById('result');
+        
+        // If SQL was generated, show it
+        if (data.sql) {
+            const sqlDiv = document.createElement('div');
+            sqlDiv.id = 'generatedSQL';
+            sqlDiv.innerHTML = `
+                <h4>Generated SQL:</h4>
+                <pre><code>${escapeHtml(data.sql)}</code></pre>
+            `;
+            resultDiv.appendChild(sqlDiv);
+        }
+
+        // Show explanation if available
+        if (data.explanation) {
+            const explDiv = document.createElement('div');
+            explDiv.className = 'alert alert-info';
+            explDiv.textContent = data.explanation;
+            resultDiv.appendChild(explDiv);
+        }
+
+        // Display the actual data
+        if (data.data) {
+            displayData(data.data);
+        }
+    }
+
+    function displayData(data) {
+        const resultDiv = document.getElementById('result');
+        
+        // Check if the command suggests a specific display format
+        const command = document.getElementById('commandInput').value.toLowerCase();
+        const wantsChart = command.includes('chart') || command.includes('graph');
+        const wantsText = command.includes('text');
+
+        if (wantsChart && Array.isArray(data)) {
+            displayChart(data);
+            return;
+        }
+
+        if (wantsText) {
+            displayTextResult(data);
+            return;
+        }
+
+        // Default to table view for array data
+        if (Array.isArray(data)) {
+            displayTable(data);
+            return;
+        }
+
+        // For other types of data, display as formatted text
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(data, null, 2);
+        resultDiv.appendChild(pre);
+    }
+
+    function displayChart(data) {
+        const resultDiv = document.getElementById('result');
+        const canvas = document.createElement('canvas');
+        canvas.id = 'resultChart';
+        canvas.style.maxHeight = '400px';
+        resultDiv.appendChild(canvas);
+
+        const keys = Object.keys(data[0]);
+        const labelKey = keys[0];
+        const valueKey = keys.find(k => typeof data[0][k] === 'number') || keys[1];
+
+        new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: data.map(row => row[labelKey]),
+                datasets: [{
+                    label: valueKey,
+                    data: data.map(row => row[valueKey]),
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false
+            }
+        });
+    }
+
+    function displayTable(data) {
+        const resultDiv = document.getElementById('result');
+        const table = document.createElement('table');
+        table.className = 'result-table';
+
+        // Create header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        Object.keys(data[0]).forEach(key => {
+            const th = document.createElement('th');
+            th.textContent = key;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        // Create body
+        const tbody = document.createElement('tbody');
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            Object.values(row).forEach(value => {
+                const td = document.createElement('td');
+                td.textContent = value;
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        resultDiv.appendChild(table);
+    }
+
+    function displayTextResult(data) {
+        const resultDiv = document.getElementById('result');
+        const pre = document.createElement('pre');
+        if (Array.isArray(data)) {
+            pre.textContent = data.map(row => 
+                Object.entries(row)
+                    .map(([key, value]) => `${key}: ${value}`)
+                    .join(', ')
+            ).join('\n');
+        } else {
+            pre.textContent = JSON.stringify(data, null, 2);
+        }
+        resultDiv.appendChild(pre);
+    }
+
+    function displaySuccess(message) {
+        const div = document.createElement('div');
+        div.className = 'success-message';
+        div.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+        document.getElementById('result').appendChild(div);
+    }
+
+    function displayError(message) {
+        const div = document.createElement('div');
+        div.className = 'error-message';
+        div.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+        document.getElementById('result').appendChild(div);
+    }
+
+    function setCommand(command) {
+        document.getElementById('commandInput').value = command;
+    }
+
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+</script>
+{% endblock %}
