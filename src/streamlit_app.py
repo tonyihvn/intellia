@@ -1,9 +1,9 @@
 import streamlit as st
 import requests
 
-st.set_page_config(page_title="MCP OpenMRS Assistant", layout="wide")
+st.set_page_config(page_title="Intelligent Assistant", layout="wide")
 
-st.title("MCP OpenMRS Assistant")
+st.title("Intelligent Assistant")
 
 # Input for natural language command/question
 query = st.text_area("Enter your natural language command or question:", height=120)

@@ -1,0 +1,335 @@
+{% extends 'base.html' %}
+
+{% block title %}Database Browser{% endblock %}
+
+{% block extra_css %}
+<style>
+    .table-list {
+        max-height: 70vh;
+        overflow: auto;
+    }
+
+    .table-item {
+        cursor: pointer;
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .table-item:hover {
+        background: #f8f9fa;
+    }
+
+    .meta-box {
+        background: #fff;
+        border: 1px solid #e9ecef;
+        padding: 12px;
+        border-radius: 4px;
+    }
+
+    .mono {
+        font-family: monospace;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div id="leftCol" class="col-md-3">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>Tables</div>
+                <div><button id="toggleSidebarBtn" class="btn btn-sm btn-outline-secondary">Collapse</button></div>
+            </div>
+            <div class="card-body table-list" id="tablesList">
+                Loading tables...
+            </div>
+        </div>
+    </div>
+    <div id="rightCol" class="col-md-9">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 id="tableTitle">Select a table</h5>
+                    <div class="text-muted small" id="tableBrief"></div>
+                </div>
+                <div>
+                    <button id="refreshBtn" class="btn btn-sm btn-outline-secondary">Refresh</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div>
+                    <div id="rowsContainer">Select a table to view rows.</div>
+                    <nav aria-label="Page navigation" class="mt-2">
+                        <ul class="pagination" id="pager"></ul>
+                    </nav>
+                </div>
+                <!-- Metadata below table -->
+                <div class="mt-3">
+                    <div class="meta-box mb-3">
+                        <h6>Columns</h6>
+                        <div id="columnsList">-</div>
+                    </div>
+                    <div class="meta-box mb-3">
+                        <h6>Indexes</h6>
+                        <div id="indexesList">-</div>
+                    </div>
+                    <div class="meta-box">
+                        <h6>Relationships</h6>
+                        <div id="relationshipsList">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- jQuery and DataTables for interactive tables and Excel export -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" />
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/keytable/2.8.0/js/dataTables.keyTable.min.js"></script>
+
+<script>
+    async function fetchJson(url, opts) {
+        const res = await fetch(url, opts);
+        if (!res.ok) {
+            const txt = await res.text();
+            throw new Error(txt || res.statusText);
+        }
+        return res.json();
+    }
+
+    let currentTable = null;
+    let currentPage = 1;
+    let pageSize = 25;
+    let lastTotal = 0;
+
+    async function loadTables() {
+        const container = document.getElementById('tablesList');
+        container.innerHTML = 'Loading...';
+        try {
+            const data = await fetchJson('/api/db/tables');
+            const tables = data.tables || [];
+            if (!tables.length) {
+                container.innerHTML = '<div class="text-muted">No tables found.</div>';
+                return;
+            }
+            container.innerHTML = '';
+            tables.forEach(t => {
+                const d = document.createElement('div');
+                d.className = 'table-item';
+                d.textContent = t.table_name;
+                d.addEventListener('click', () => selectTable(t.table_name));
+                container.appendChild(d);
+            });
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = '<div class="text-danger">Failed to load tables</div>';
+        }
+    }
+
+    async function selectTable(table) {
+        currentTable = table;
+        currentPage = 1;
+        document.getElementById('tableTitle').textContent = table;
+        document.getElementById('tableBrief').textContent = '';
+        await loadTableMeta();
+        await loadRows();
+    }
+
+    async function loadTableMeta() {
+        if (!currentTable) return;
+        try {
+            const meta = await fetchJson('/api/db/table/' + encodeURIComponent(currentTable) + '/meta');
+            // Columns
+            const cols = meta.columns || [];
+            const cdiv = document.getElementById('columnsList');
+            cdiv.innerHTML = '';
+            cols.forEach(c => {
+                const el = document.createElement('div');
+                el.innerHTML = '<strong>' + escapeHtml(c.Field) + '</strong> <span class="text-muted">' + escapeHtml(c.Type) + '</span>';
+                cdiv.appendChild(el);
+            });
+            // Indexes
+            const idx = meta.indexes || [];
+            const idxDiv = document.getElementById('indexesList');
+            idxDiv.innerHTML = '';
+            if (!idx.length) idxDiv.textContent = '-';
+            idx.forEach(i => {
+                const el = document.createElement('div');
+                el.className = 'mono small';
+                el.textContent = i.Key_name + ' (' + i.Column_name + ') ' + (i.Non_unique == 0 ? 'UNIQUE' : '');
+                idxDiv.appendChild(el);
+            });
+            // Relationships
+            const rel = meta.foreign_keys || [];
+            const relDiv = document.getElementById('relationshipsList');
+            relDiv.innerHTML = '';
+            if (!rel.length) relDiv.textContent = '-';
+            rel.forEach(r => {
+                const el = document.createElement('div');
+                el.textContent = r.COLUMN_NAME + ' → ' + r.REFERENCED_TABLE_NAME + '.' + r.REFERENCED_COLUMN_NAME;
+                relDiv.appendChild(el);
+            });
+            // Brief
+            const brief = meta.brief || '';
+            document.getElementById('tableBrief').textContent = brief;
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function escapeHtml(s) {
+        if (!s && s !== 0) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    async function loadRows(page = 1) {
+        if (!currentTable) return;
+        const rowsContainer = document.getElementById('rowsContainer');
+        rowsContainer.innerHTML = 'Loading rows...';
+        try {
+            const data = await fetchJson(`/api/db/table/${encodeURIComponent(currentTable)}/rows?page=${page}&page_size=${pageSize}`);
+            const rows = data.rows || [];
+            const total = data.total || 0;
+            lastTotal = total;
+            if (!rows.length) {
+                rowsContainer.innerHTML = '<div class="text-muted">No rows to display.</div>';
+                document.getElementById('pager').innerHTML = '';
+                return;
+            }
+            // Build DOM table and initialize DataTable for search/filter/paging/export
+            const cols = Object.keys(rows[0]);
+            rowsContainer.innerHTML = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-responsive';
+            const tbl = document.createElement('table');
+            tbl.className = 'table table-sm table-bordered generated-datatable';
+            const thead = document.createElement('thead');
+            // Header row (column titles)
+            const trHead = document.createElement('tr');
+            cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; trHead.appendChild(th); });
+            thead.appendChild(trHead);
+            // Filter row (inputs) - follow DataTables multi-filter example
+            const trFilter = document.createElement('tr');
+            cols.forEach(c => {
+                const th = document.createElement('th');
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'column-filter form-control form-control-sm';
+                input.placeholder = 'Filter';
+                th.appendChild(input);
+                trFilter.appendChild(th);
+            });
+            thead.appendChild(trFilter);
+            tbl.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            rows.forEach(r => { const tr = document.createElement('tr'); cols.forEach(c => { const td = document.createElement('td'); td.textContent = (r[c] === null || r[c] === undefined) ? '' : String(r[c]); tr.appendChild(td); }); tbody.appendChild(tr); });
+            tbl.appendChild(tbody);
+            wrapper.appendChild(tbl);
+            rowsContainer.appendChild(wrapper);
+            // initialize DataTable
+            try {
+                if (window.jQuery && $.fn && $.fn.dataTable) {
+                    if ($.fn.dataTable.isDataTable(tbl)) {
+                        $(tbl).DataTable().clear().rows.add(rows).draw();
+                    } else {
+                        $(tbl).DataTable({
+                            pageLength: 25,
+                            lengthChange: true,
+                            searching: true,
+                            ordering: true,
+                            paging: true,
+                            dom: 'Bfrtip',
+                            buttons: [{ extend: 'excelHtml5', text: 'Export to Excel' }],
+                            keys: true,
+                            orderCellsTop: true,
+                            // wire up per-column filters after init
+                            initComplete: function () {
+                                var api = this.api();
+                                // For each column, hook up the input in the second header row
+                                api.columns().every(function (colIdx) {
+                                    var column = this;
+                                    var input = $(api.table().header()).find('tr:eq(1) th').eq(colIdx).find('input');
+                                    $(input).on('keyup change clear', function () {
+                                        var val = this.value;
+                                        if (column.search() !== val) {
+                                            column.search(val).draw();
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to initialize DataTable', e);
+            }
+        } catch (e) {
+            console.error(e);
+            rowsContainer.innerHTML = '<div class="text-danger">Failed to load rows</div>';
+        }
+    }
+
+    function renderPager(page, pages) {
+        const pager = document.getElementById('pager');
+        pager.innerHTML = '';
+        if (pages <= 1) return;
+        for (let p = 1; p <= pages; p++) {
+            const li = document.createElement('li');
+            li.className = 'page-item ' + (p === page ? 'active' : '');
+            const a = document.createElement('a');
+            a.className = 'page-link';
+            a.href = '#';
+            a.textContent = p;
+            a.addEventListener('click', (ev) => { ev.preventDefault(); loadRows(p); });
+            li.appendChild(a);
+            pager.appendChild(li);
+        }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+        if (currentTable) {
+            await loadTableMeta();
+            await loadRows(currentPage);
+        } else {
+            loadTables();
+        }
+    });
+
+    // Collapse / Expand sidebar toggle for Tables list
+    document.getElementById('toggleSidebarBtn').addEventListener('click', () => {
+        const left = document.getElementById('leftCol');
+        const right = document.getElementById('rightCol');
+        const btn = document.getElementById('toggleSidebarBtn');
+        if (!left || !right || !btn) return;
+        if (left.style.display !== 'none') {
+            // collapse
+            left.style.display = 'none';
+            right.classList.remove('col-md-9');
+            right.classList.add('col-md-12');
+            btn.textContent = 'Expand';
+        } else {
+            // expand
+            left.style.display = 'block';
+            right.classList.remove('col-md-12');
+            right.classList.add('col-md-9');
+            btn.textContent = 'Collapse';
+        }
+    });
+
+    // Initialize
+    loadTables();
+</script>
+{% endblock %}

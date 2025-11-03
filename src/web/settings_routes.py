@@ -6,6 +6,10 @@ from dotenv import load_dotenv, find_dotenv, set_key
 from werkzeug.utils import secure_filename
 from ..config import Config
 from ..llm.client import LLMClient
+from ..rag.manager import RAGManager
+
+# Single RAG manager instance for settings operations (uses on-disk vector store)
+rag_manager = RAGManager()
 
 # Load environment variables
 env_path = find_dotenv()
@@ -420,3 +424,44 @@ def handle_visualization():
             'default_format': data.get('default_format', 'html')
         })
         return jsonify({'success': True})
+
+
+@settings_routes.route('/settings/examples', methods=['GET', 'POST', 'DELETE'])
+def handle_examples():
+    """Get or set example commands shown in the command UI."""
+    # Use the RAG examples collection as source of truth
+    if request.method == 'GET':
+        try:
+            docs = rag_manager.get_all_examples()
+            examples = [d.get('text') for d in docs]
+            return jsonify({'examples': examples})
+        except Exception as e:
+            return jsonify({'examples': [], 'error': str(e)}), 500
+
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        new_example = data.get('example')
+        if not new_example:
+            return jsonify({'error': 'example is required'}), 400
+
+        # Persist into vector store
+        try:
+            success = rag_manager.add_examples([{'text': new_example, 'metadata': {'source': 'examples'}}])
+            if success:
+                return jsonify({'success': True})
+            return jsonify({'error': 'Failed to persist example'}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    if request.method == 'DELETE':
+        data = request.get_json() or {}
+        example = data.get('example')
+        if not example:
+            return jsonify({'error': 'example is required'}), 400
+        try:
+            ok = rag_manager.delete_example(example)
+            if ok:
+                return jsonify({'success': True})
+            return jsonify({'error': 'Failed to delete example'}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500

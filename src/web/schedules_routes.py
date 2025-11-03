@@ -67,6 +67,21 @@ def create_schedule():
     if not job_spec:
         return jsonify({"error": "job_spec required"}), 400
 
+    # job_spec may be a JSON string (produced by some clients/LLM). Coerce to dict.
+    if isinstance(job_spec, str):
+        try:
+            job_spec = json.loads(job_spec)
+        except Exception:
+            logger.error("create_schedule: job_spec was a string but could not be parsed as JSON")
+            return jsonify({"error": "job_spec must be a JSON object or a JSON string representing an object"}), 400
+
+    if not isinstance(job_spec, dict):
+        return jsonify({"error": "job_spec must be a JSON object"}), 400
+
+    # Basic validation
+    if not job_spec.get('action') or not job_spec.get('schedule'):
+        return jsonify({"error": "job_spec must include 'action' and 'schedule'"}), 400
+
     scheduler = get_scheduler()
     try:
         job_id = scheduler.add_job(job_spec)

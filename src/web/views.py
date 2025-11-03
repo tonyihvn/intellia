@@ -20,3 +20,8 @@ def db_config():
 @view_routes.route('/rag')
 def rag():
     return render_template('rag.html')
+
+
+@view_routes.route('/db/browser')
+def db_browser():
+    return render_template('db_browser.html')

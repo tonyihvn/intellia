@@ -1,6 +1,7 @@
 import os
 import json
 from flask import Blueprint, request, jsonify, current_app
+from werkzeug.utils import secure_filename
 from ..rag.manager import RAGManager
 from ..config import Config
 
@@ -61,32 +62,56 @@ def manage_sources():
             return jsonify({'sources': []})
             
     elif request.method == 'POST':
-        if not request.is_json:
-            return jsonify({"error": "Request must be JSON"}), 415
-            
-        data = request.get_json()
-        new_source = data.get('url')
-        
-        if not new_source:
-            return jsonify({'error': 'No URL provided'}), 400
-            
+        # Accept either JSON with a URL or form-data file upload
+        new_entry = None
+        # Handle file upload (multipart/form-data)
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename:
+                filename = secure_filename(file.filename)
+                upload_dir = os.path.join(current_app.static_folder, 'uploads', 'context_sources')
+                os.makedirs(upload_dir, exist_ok=True)
+                file_path = os.path.join(upload_dir, filename)
+                try:
+                    file.save(file_path)
+                except Exception as e:
+                    return jsonify({'error': f'Failed to save uploaded file: {str(e)}'}), 500
+                new_entry = {'filename': filename, 'path': file_path, 'type': 'file'}
+
+        else:
+            # JSON payload with URL
+            if not request.is_json:
+                return jsonify({"error": "Request must be JSON or multipart/form-data"}), 415
+            data = request.get_json()
+            new_source = data.get('url')
+            if not new_source:
+                return jsonify({'error': 'No URL provided'}), 400
+            new_entry = {'url': new_source, 'type': 'url'}
+
         # Load existing sources
         try:
             with open(sources_path, 'r') as f:
                 existing_data = json.load(f)
         except FileNotFoundError:
             existing_data = {'sources': []}
-            
-        # Add new source if not already present
-        if new_source not in [s['url'] for s in existing_data['sources']]:
-            existing_data['sources'].append({'url': new_source})
-            
-            # Save updated sources
+
+        # Avoid duplicates by url or filename
+        exists = False
+        for s in existing_data.get('sources', []):
+            if new_entry.get('type') == 'url' and s.get('url') == new_entry.get('url'):
+                exists = True
+                break
+            if new_entry.get('type') == 'file' and s.get('filename') == new_entry.get('filename'):
+                exists = True
+                break
+
+        if not exists:
+            existing_data.setdefault('sources', []).append(new_entry)
             os.makedirs(os.path.dirname(sources_path), exist_ok=True)
             with open(sources_path, 'w') as f:
                 json.dump(existing_data, f, indent=4)
-                
-        return jsonify({'success': True})
+
+        return jsonify({'success': True, 'source': new_entry})
 
 @rag_routes.route('/api/rag/knowledge', methods=['GET'])
 def get_all_knowledge():

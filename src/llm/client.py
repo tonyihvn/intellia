@@ -4,6 +4,7 @@ import time
 import json
 import logging
 from ..config import Config
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -20,15 +21,19 @@ class LLMClient:
             provider: Optional provider name to use (e.g., 'google', 'openai', 'anthropic', 'local')
             settings: Optional settings dict for the provider. If not provided, will load from Config.
         """
-        # Always include local provider config for fallback safety
-        if settings is None:
-            self.providers = Config.LLM_PROVIDERS
-        else:
-            self.providers = {provider: settings}
-            # Merge in local provider so fallback never KeyErrors
-            self.providers['local'] = Config.LLM_PROVIDERS.get('local', {
-                'api_url': 'http://localhost:11434'
-            })
+        # Load runtime LLM provider settings (merge of defaults, saved config and env vars)
+        runtime_cfg = Config.get_llm_config()
+        self.providers = runtime_cfg.get('providers', Config.LLM_PROVIDERS.copy())
+
+        # If explicit settings were provided for a single provider, merge them on top
+        if provider and settings:
+            # ensure provider entry exists
+            self.providers.setdefault(provider, {})
+            # merge provided settings (do not remove other providers)
+            self.providers[provider].update(settings)
+        # Ensure 'local' exists for fallback safety
+        if 'local' not in self.providers:
+            self.providers['local'] = Config.LLM_PROVIDERS.get('local', {'api_url': 'http://localhost:11434'})
         
         # Set up local model configuration (from config, with sensible defaults)
         local_cfg = Config.LLM_PROVIDERS.get('local', {})
@@ -224,19 +229,21 @@ class LLMClient:
         """
         cloud_candidates = []
         for name, cfg in self.providers.items():
+            # Skip local provider here; it's handled separately as a fallback
             if name == 'local' or not isinstance(cfg, dict):
                 continue
 
-            # A provider is considered enabled if 'enabled' is not explicitly set to False.
-            if cfg.get('enabled') is False:
+            # Treat explicit false-like enabled values as disabled
+            enabled_val = cfg.get('enabled', True)
+            if (isinstance(enabled_val, str) and enabled_val.lower() in ('false', '0', 'no')) or enabled_val is False:
                 logging.info(f"Provider {name} skipped: Explicitly disabled in config.")
                 continue
 
-            model = cfg.get('model', '').strip()
+            model = (cfg.get('model') or '').strip()
             if not model:
                 logging.info(f"Provider {name} skipped: No model configured.")
                 continue
-            
+
             # If we reach here, the provider is a candidate.
             priority = cfg.get('priority', 99)
             cloud_candidates.append((priority, name))
@@ -608,3 +615,132 @@ class LLMClient:
 
     def get_models(self):
         return self.models
+
+    def classify(self, prompt, timeout=15):
+        """Ask the LLM to classify whether the prompt requires SQL or can be answered as text.
+
+        Returns a dict: {'intent': 'sql'|'text'|'unknown', 'explain': str, 'suggested_sql': str|None}
+        This method will try cloud providers first (if internet) then local Ollama.
+        """
+        logging.info("Running intent classification for prompt")
+        # Build a short instruction
+        instruction = (
+            "Classify whether the user's request requires executing SQL against the database to fulfill. "
+            "Respond on the first line with either SQL or TEXT (uppercase). Optionally include a suggested SQL query "
+            "enclosed in ```sql ... ``` after the first line if it's SQL. Then include a brief one-line explanation.\n\n"
+            f"User request:\n{prompt}"
+        )
+
+        # Try cloud providers if internet is available
+        try:
+            self.has_internet = self._check_internet_connection()
+            providers = self.get_available_providers() if self.has_internet else []
+
+            # Try cloud first
+            for provider in providers:
+                try:
+                    cfg = self.providers.get(provider, {})
+                    if provider == 'openai':
+                        headers = {"Authorization": f"Bearer {cfg.get('api_key')}", "Content-Type": "application/json"}
+                        payload = {
+                            "model": cfg.get('model'),
+                            "messages": [
+                                {"role": "system", "content": "You are an intent classifier. Reply briefly."},
+                                {"role": "user", "content": instruction}
+                            ],
+                            "temperature": 0.0,
+                            "max_tokens": 200,
+                        }
+                        resp = requests.post(cfg.get('api_url'), headers=headers, json=payload, timeout=timeout)
+                        resp.raise_for_status()
+                        body = resp.json()
+                        if 'choices' in body and len(body['choices']) > 0:
+                            text = body['choices'][0]['message']['content'].strip()
+                            return self._parse_classify_response(text)
+
+                    # For other cloud providers fallback to generic POST if configured
+                    if provider in ('google', 'anthropic'):
+                        # Try a generic generate request similar to cloud path in _try_cloud_generation
+                        headers = {"Content-Type": "application/json"}
+                        if cfg.get('api_key'):
+                            headers.update({ 'Authorization': f"Bearer {cfg.get('api_key')}" })
+                        payload = { 'prompt': instruction, 'max_tokens': 200, 'temperature': 0.0 }
+                        resp = requests.post(cfg.get('api_url'), headers=headers, json=payload, timeout=timeout)
+                        resp.raise_for_status()
+                        body = resp.json()
+                        # Best-effort extraction
+                        text = ''
+                        if isinstance(body, dict):
+                            if 'choices' in body and body['choices']:
+                                text = body['choices'][0].get('text') or body['choices'][0].get('message', {}).get('content', '')
+                            elif 'completion' in body:
+                                text = body.get('completion', '')
+                        if text:
+                            return self._parse_classify_response(text.strip())
+                except Exception as e:
+                    logging.debug(f"Provider {provider} classify failed: {e}")
+                    continue
+
+            # Local Ollama fallback
+            try:
+                ollama_url = self.providers['local']['api_url'].rstrip('/')
+                resp = requests.post(f"{ollama_url}/api/generate", json={
+                    "model": self.model_name,
+                    "prompt": instruction,
+                    "temperature": 0.0,
+                    "stream": False,
+                    "max_tokens": 200
+                }, timeout=timeout)
+                resp.raise_for_status()
+                body = resp.json()
+                text = ''
+                if isinstance(body, dict):
+                    text = body.get('response') or body.get('choices', [{}])[0].get('text', '')
+                if text:
+                    return self._parse_classify_response(text.strip())
+            except Exception as e:
+                logging.debug(f"Local classify failed: {e}")
+
+        except Exception as e:
+            logging.debug(f"Classification top-level error: {e}")
+
+        return {'intent': 'unknown', 'explain': 'Could not classify intent', 'suggested_sql': None}
+
+    def _parse_classify_response(self, text: str):
+        """Parse the classifier response text into structured dict."""
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        intent = 'unknown'
+        suggested_sql = None
+        explain = ''
+        if lines:
+            first = lines[0].upper()
+            if first.startswith('SQL') or first.startswith('YES'):
+                intent = 'sql'
+            elif first.startswith('TEXT') or first.startswith('NO'):
+                intent = 'text'
+            else:
+                # if the first line contains backtick fenced sql, detect it
+                if lines[0].startswith('```sql') or 'SELECT' in lines[0].upper():
+                    intent = 'sql'
+
+        # Extract fenced SQL if present
+        m = re.search(r"```sql\s*(.*?)\s*```", text, flags=re.I | re.S)
+        if m:
+            suggested_sql = m.group(1).strip()
+        else:
+            # Look for first SQL-like statement substring
+            s_idx = None
+            for kw in ("SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP"):
+                i = text.upper().find(kw)
+                if i != -1 and (s_idx is None or i < s_idx):
+                    s_idx = i
+            if s_idx is not None:
+                suggested_sql = text[s_idx:].strip()
+
+        # Explanation is anything after first line and not the fenced SQL
+        if len(lines) > 1:
+            explain = '\n'.join(lines[1:])
+        else:
+            explain = ''
+
+        return {'intent': intent, 'explain': explain, 'suggested_sql': suggested_sql}

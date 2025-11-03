@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,12 +16,15 @@
             border-radius: 4px;
             cursor: pointer;
         }
+
         .viz-option.active {
             background-color: #007bff;
             color: white;
             border-color: #0056b3;
         }
-        .guider-item, .source-item {
+
+        .guider-item,
+        .source-item {
             padding: 10px;
             margin: 5px 0;
             border: 1px solid #ddd;
@@ -29,17 +33,20 @@
             justify-content: space-between;
             align-items: center;
         }
+
         .btn-remove {
             padding: 0 8px;
             color: #dc3545;
             background: none;
             border: none;
         }
+
         .btn-remove:hover {
             color: #bd2130;
         }
     </style>
 </head>
+
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
@@ -68,7 +75,7 @@
 
     <div class="container mt-4">
         <h2>LLM Settings</h2>
-        
+
         <!-- Cloud Providers Section -->
         <div class="card mb-4">
             <div class="card-header">
@@ -94,7 +101,7 @@
                 <div id="ollamaStatus" class="alert alert-info">
                     Checking Ollama status...
                 </div>
-                
+
                 <form id="ollamaForm">
                     <div class="mb-3">
                         <label class="form-label">Available Models</label>
@@ -117,13 +124,33 @@
                 <form id="trainingForm" onsubmit="addGuider(event)">
                     <div class="mb-3">
                         <label for="new-guider" class="form-label">Add New Training Data:</label>
-                        <textarea id="new-guider" class="form-control" rows="3" 
+                        <textarea id="new-guider" class="form-control" rows="3"
                             placeholder="Enter information to help the AI understand the data structure or business rules..."></textarea>
                     </div>
                     <button type="submit" class="btn btn-primary">Add Training Data</button>
                 </form>
                 <div id="guiders-list" class="mt-3">
                     <!-- Existing guiders will be listed here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Example Commands Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">Example Commands</h3>
+            </div>
+            <div class="card-body">
+                <form id="examplesForm" onsubmit="addExample(event)">
+                    <div class="mb-3">
+                        <label for="new-example" class="form-label">Add Example Command</label>
+                        <input id="new-example" class="form-control"
+                            placeholder="e.g. Show me total appointments by department as a chart">
+                    </div>
+                    <button class="btn btn-primary" type="submit">Add Example</button>
+                </form>
+                <div id="examples-list" class="mt-3">
+                    <!-- Examples will be listed here -->
                 </div>
             </div>
         </div>
@@ -137,7 +164,7 @@
                 <form id="sourcesForm" onsubmit="addSource(event)">
                     <div class="mb-3">
                         <label for="new-source-url" class="form-label">Add URL Source:</label>
-                        <input type="url" id="new-source-url" class="form-control" 
+                        <input type="url" id="new-source-url" class="form-control"
                             placeholder="Enter URL to documentation or reference...">
                     </div>
                     <div class="mb-3">
@@ -220,7 +247,7 @@
         </div>
     </div>
 
-        
+
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -239,7 +266,7 @@
             try {
                 const res = await fetch('/api/llm/providers');
                 const providers = await res.json();
-                const providerNames = Object.keys(providers).sort((a,b) => (providers[a].priority||99) - (providers[b].priority||99));
+                const providerNames = Object.keys(providers).sort((a, b) => (providers[a].priority || 99) - (providers[b].priority || 99));
                 list.innerHTML = providerNames.map(name => {
                     const p = providers[name];
                     return `
@@ -272,6 +299,63 @@
             }
         }
 
+        // ===== Example commands management =====
+        async function loadExamplesSettings() {
+            const list = document.getElementById('examples-list');
+            list.innerHTML = 'Loading...';
+            try {
+                const resp = await fetch('/api/settings/examples');
+                const data = await resp.json();
+                const examples = data.examples || [];
+                list.innerHTML = '';
+                if (!examples.length) {
+                    list.innerHTML = '<div class="text-muted">No example commands configured.</div>';
+                    return;
+                }
+                examples.forEach(ex => {
+                    const div = document.createElement('div');
+                    div.className = 'example-item guider-item';
+                    div.innerHTML = `<div style="flex:1">${escapeHtml(ex)}</div>`;
+                    const del = document.createElement('button');
+                    del.className = 'btn btn-sm btn-outline-danger';
+                    del.textContent = 'Delete';
+                    del.addEventListener('click', async () => {
+                        try {
+                            const r = await fetch('/api/settings/examples', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ example: ex }) });
+                            if (r.ok) loadExamplesSettings(); else alert('Failed to delete example');
+                        } catch (e) { console.error(e); alert('Failed to delete example'); }
+                    });
+                    div.appendChild(del);
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error('Failed to load examples', e);
+                list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
+            }
+        }
+
+        async function addExample(ev) {
+            ev.preventDefault();
+            const input = document.getElementById('new-example');
+            const val = input.value && input.value.trim();
+            if (!val) return alert('Please enter an example command');
+            try {
+                const r = await fetch('/api/settings/examples', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ example: val }) });
+                if (r.ok) {
+                    input.value = '';
+                    loadExamplesSettings();
+                } else {
+                    const j = await r.json();
+                    alert('Failed to add example: ' + (j.error || r.statusText));
+                }
+            } catch (e) { console.error(e); alert('Failed to add example'); }
+        }
+
+        // Ensure examples are loaded alongside other settings
+        document.addEventListener('DOMContentLoaded', () => {
+            loadExamplesSettings();
+        });
+
         async function saveProviders() {
             try {
                 const res = await fetch('/api/llm/providers');
@@ -302,15 +386,15 @@
 
         async function saveProviderSettings(event, provider) {
             event.preventDefault();
-            
+
             const form = event.target;
             const formData = new FormData(form);
             const config = {};
-            
+
             for (let [key, value] of formData.entries()) {
                 config[key] = value;
             }
-            
+
             try {
                 const response = await fetch('/api/llm/config', {
                     method: 'POST',
@@ -334,7 +418,7 @@
                         throw new Error(`HTTP error ${response.status}`);
                     }
                 }
-                
+
                 const data = await response.json();
                 if (data.success) {
                     alert('Settings saved successfully');
@@ -356,7 +440,7 @@
                     },
                     body: JSON.stringify({ provider: provider })
                 });
-                
+
                 const data = await response.json();
                 if (data.success) {
                     alert(data.message || 'Connection test successful');
@@ -375,7 +459,7 @@
             try {
                 const response = await fetch('/api/llm/ollama/status');
                 const data = await response.json();
-                
+
                 if (data.running) {
                     statusDiv.className = 'alert alert-success';
                     statusDiv.textContent = 'Ollama is running';
@@ -395,7 +479,7 @@
             try {
                 const response = await fetch('/api/llm/ollama/models');
                 const data = await response.json();
-                
+
                 modelList.innerHTML = data.models.map(model => `
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="model-${model.name}" 
@@ -440,18 +524,18 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ guider: guiderText })
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    addGuiderToList(guiderText);
-                    document.getElementById('new-guider').value = '';
-                } else {
-                    throw new Error(result.error || 'Failed to add training data');
-                }
-            })
-            .catch(error => {
-                alert('Error adding training data: ' + error.message);
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        addGuiderToList(guiderText);
+                        document.getElementById('new-guider').value = '';
+                    } else {
+                        throw new Error(result.error || 'Failed to add training data');
+                    }
+                })
+                .catch(error => {
+                    alert('Error adding training data: ' + error.message);
+                });
         }
 
         function addGuiderToList(guider) {
@@ -476,17 +560,17 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ guider: guiderText })
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    item.remove();
-                } else {
-                    throw new Error(result.error || 'Failed to remove training data');
-                }
-            })
-            .catch(error => {
-                alert('Error removing training data: ' + error.message);
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        item.remove();
+                    } else {
+                        throw new Error(result.error || 'Failed to remove training data');
+                    }
+                })
+                .catch(error => {
+                    alert('Error removing training data: ' + error.message);
+                });
         }
 
         // ===== Context Sources Management =====
@@ -508,19 +592,19 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    addSourceToList(result.source);
-                    document.getElementById('new-source-url').value = '';
-                    document.getElementById('source-file').value = '';
-                } else {
-                    throw new Error(result.error || 'Failed to add source');
-                }
-            })
-            .catch(error => {
-                alert('Error adding source: ' + error.message);
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        addSourceToList(result.source);
+                        document.getElementById('new-source-url').value = '';
+                        document.getElementById('source-file').value = '';
+                    } else {
+                        throw new Error(result.error || 'Failed to add source');
+                    }
+                })
+                .catch(error => {
+                    alert('Error adding source: ' + error.message);
+                });
         }
 
         function addSourceToList(source) {
@@ -545,17 +629,17 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ source: sourceId })
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    item.remove();
-                } else {
-                    throw new Error(result.error || 'Failed to remove source');
-                }
-            })
-            .catch(error => {
-                alert('Error removing source: ' + error.message);
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        item.remove();
+                    } else {
+                        throw new Error(result.error || 'Failed to remove source');
+                    }
+                })
+                .catch(error => {
+                    alert('Error removing source: ' + error.message);
+                });
         }
 
         // ===== Visualization Settings =====
@@ -593,17 +677,17 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings.visualization)
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    alert('Settings saved successfully');
-                } else {
-                    throw new Error(result.error || 'Failed to save settings');
-                }
-            })
-            .catch(error => {
-                alert('Error saving settings: ' + error.message);
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert('Settings saved successfully');
+                    } else {
+                        throw new Error(result.error || 'Failed to save settings');
+                    }
+                })
+                .catch(error => {
+                    alert('Error saving settings: ' + error.message);
+                });
         }
 
         // ===== Load All Settings =====
@@ -669,7 +753,7 @@
                     setupChartOptions();
                 });
         }
-    
+
         // ===== SMTP Settings =====
         async function loadSmtpSettings() {
             try {
@@ -720,15 +804,15 @@
 
         async function saveProviderSettings(event, provider) {
             event.preventDefault();
-            
+
             const form = event.target;
             const formData = new FormData(form);
             const config = {};
-            
+
             for (let [key, value] of formData.entries()) {
                 config[key] = value;
             }
-            
+
             try {
                 const response = await fetch('/api/llm/config', {
                     method: 'POST',
@@ -740,7 +824,7 @@
                         config: config
                     })
                 });
-                
+
                 const data = await response.json();
                 if (data.success) {
                     alert(data.message || 'Settings saved successfully');
@@ -780,4 +864,5 @@
         // (Removed duplicate and incomplete function definitions to fix syntax errors)
     </script>
 </body>
+
 </html>

@@ -141,6 +141,38 @@ class CommandHandler:
         try:
             # For queries we return preview (sql + sample results) unless execute==True
             if not execute:
+                # First, ask the LLM to classify whether this prompt needs SQL or can be answered as text
+                try:
+                    enhancer = getattr(self.query_handler, 'query_enhancer', None)
+                    enhanced_ctx = None
+                    if enhancer:
+                        try:
+                            enhanced = enhancer.enhance_query_context(command_text)
+                            enhanced_ctx = enhanced.get('enhanced_prompt')
+                        except Exception:
+                            enhanced_ctx = None
+
+                    classify_input = (enhanced_ctx + "\n\n" + command_text) if enhanced_ctx else command_text
+                    cls = self.llm_client.classify(classify_input)
+                except Exception as e:
+                    cls = {'intent': 'unknown', 'explain': str(e), 'suggested_sql': None}
+
+                intent = (cls.get('intent') or 'unknown').lower()
+                # If intent is text, return an immediate chat-like response
+                if intent == 'text':
+                    try:
+                        answer = self.llm_client.generate(command_text)
+                    except Exception:
+                        answer = cls.get('explain') or 'Unable to generate text response.'
+
+                    return {
+                        'type': 'chat_response',
+                        'response': answer,
+                        'explanation': answer,
+                        'needs_confirmation': False
+                    }
+
+                # Otherwise, fall back to SQL preview flow (intent == 'sql' or unknown)
                 gen = self.query_handler.generate_sql(command_text)
                 sql = gen if isinstance(gen, str) else gen.get('sql') if isinstance(gen, dict) else None
                 explanation = gen.get('explanation') if isinstance(gen, dict) else None
@@ -152,7 +184,8 @@ class CommandHandler:
                     'explanation': explanation,
                     'results': None,
                     'error': None,
-                    'needs_confirmation': True
+                    'needs_confirmation': True,
+                    'classifier': cls
                 }
 
             # execute True => actually run the query

@@ -1,0 +1,6 @@
+{
+    "examples": [
+        "show me all the next appointment date and time and patient name for next month",
+        "Show a list of all the Patients whose CD4 Count is greater than 200"
+    ]
+}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}OpenMRS Assistant{% endblock %}
+{% block title %}Intelligent Assistant{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -190,7 +190,7 @@
 
 
         <div class="mb-3">
-            <label for="commandInput" class="form-label">What would you like to do?</label>
+            <label for="commandInput" class="form-label"><b>What would you like to do?</b></label>
             <small class="text-muted"><i>Ask questions, schedule tasks, or take immediate actions</i></small>
             <textarea class="command-input" id="commandInput" rows="4" placeholder="Examples:
 - Show me all patients diagnosed with malaria in the last month
@@ -203,6 +203,9 @@
             <button id="submitBtn" class="btn btn-primary">
                 <i class="fas fa-paper-plane"></i> Go
             </button>
+            <button id="micBtn" class="btn btn-outline-secondary ms-2" title="Speak your command">
+                <i class="fas fa-microphone"></i>
+            </button>
         </div>
 
         <div class="row command-row">
@@ -210,13 +213,15 @@
             <div class="col-md-4">
                 <div id="historyPanel" class="mb-3">
                     <h5 id="historyHeader" style="cursor:pointer">History</h5>
+                    <hr>
                     <div id="historyList">Click "History" to load</div>
                 </div>
             </div>
 
             <!-- Chat / Results on the RIGHT -->
             <div class="col-md-12">
-                <div id="result">
+                <div id="previewBanner" style="display:none"></div>
+                <div id="result" style="display:none">
                 </div>
 
                 <!-- Explanation row (hidden until Go clicked) -->
@@ -237,6 +242,8 @@
                         placeholder="Generated SQL will appear here"></textarea>
                     <div class="mt-2">
                         <button id="confirmBtn" class="btn btn-success" disabled>Confirm (Execute)</button>
+                        <button id="toggleResultBtn" class="btn btn-sm btn-outline-secondary ms-2">Show Results</button>
+                        <div id="confirmResult" class="mt-2"></div>
                     </div>
                 </div>
             </div>
@@ -244,19 +251,56 @@
 
         <div class="examples">
             <h3>Example Commands</h3>
-            <div class="example-item" onclick="setCommand('Show me all patients who visited the clinic today')">
-                ➤ Show me all patients who visited the clinic today
+            <div id="examplesList">
+                <!-- Dynamically populated from settings (/api/settings/examples) -->
+                <div class="text-muted">Loading examples...</div>
             </div>
-            <div class="example-item"
-                onclick="setCommand('Send an email to admin@example.com now with subject \'System Status\' body \'All systems operational\'')">
-                ➤ Send an email to admin@example.com now about system status
+        </div>
+        <hr>
+        <!-- Database-wide search panel (collapsed by default) -->
+        <div class="d-flex justify-content-between align-items-center">
+
+            <button id="toggleDbSearch" class="btn btn-sm btn-outline-secondary">Search Local Database</button>
+        </div>
+        <div class="mt-4 p-3" id="dbSearchPanel"
+            style="background:#fff; border-radius:6px; box-shadow:0 0 6px rgba(0,0,0,0.03); display:none;">
+            <h6 style="margin:0">Search Local database</h6>
+            <div class="mb-2">
+                <input id="dbSearchInput" class="form-control"
+                    placeholder="Search database for text (e.g. 'pregnancy')" />
             </div>
-            <div class="example-item"
-                onclick="setCommand('Every day at 5pm, send an email to team@example.com with daily patient summary')">
-                ➤ Every day at 5pm, send an email to team@example.com with daily patient summary
+            <div class="mb-2">
+                <label class="form-label small">Tables to search (check to include). Use the 'Select all' checkbox to
+                    toggle all.</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="dbSelectAll" />
+                    <label class="form-check-label" for="dbSelectAll">Select all</label>
+                </div>
+                <div id="dbTablesList"
+                    style="max-height:200px; overflow:auto; border:1px solid #eee; padding:8px; border-radius:4px">
+                </div>
             </div>
-            <div class="example-item" onclick="setCommand('Show me total appointments by department as a chart')">
-                ➤ Show me total appointments by department as a chart
+            <div>
+                <button id="dbSearchBtn" class="btn btn-outline-primary">Search DB</button>
+                <button id="dbClearBtn" class="btn btn-sm btn-outline-secondary">Clear</button>
+            </div>
+            <div id="dbSearchResults" class="mt-3"></div>
+        </div>
+        <!-- Modal for showing a full row from DB search -->
+        <div class="modal fade" id="dbRowModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="dbRowModalTitle">Row</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="dbRowModalBody">
+                        <!-- Full row content will be injected here -->
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -264,7 +308,18 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- jQuery (required by DataTables) -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<!-- DataTables CSS/JS and Buttons for Excel export -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" />
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/keytable/2.8.0/js/dataTables.keyTable.min.js"></script>
 <script>
     // track if user has clicked Go (unlocked panels)
     window.goClicked = false;
@@ -303,6 +358,28 @@
             document.getElementById('toggleSql').textContent = 'Show SQL';
 
             displayResult(data);
+            // If this result requires confirmation, hide global history and focus the UI on this preview
+            try {
+                if (data && data.needs_confirmation) {
+                    window.pendingConfirmation = true;
+                    const historyPane = document.getElementById('historyList');
+                    if (historyPane) {
+                        historyPane.dataset._wasVisible = historyPane.style.display === '' || historyPane.style.display === 'block' ? '1' : '0';
+                        historyPane.style.display = 'none';
+                    }
+                    const previewBanner = document.getElementById('previewBanner');
+                    if (previewBanner) {
+                        previewBanner.style.display = 'block';
+                        previewBanner.innerHTML = '<div class="alert alert-warning">This action is a preview that requires confirmation — history is hidden until you Confirm or Cancel.</div>';
+                    }
+                    // Disable confirm button until a preview has a history id (it will be enabled by displayResult logic)
+                } else {
+                    // clear any pending flags
+                    window.pendingConfirmation = false;
+                    const previewBanner = document.getElementById('previewBanner');
+                    if (previewBanner) previewBanner.style.display = 'none';
+                }
+            } catch (e) { console.warn('preview UI toggle error', e); }
         } catch (error) {
             console.error('Error:', error);
             displayError('Error processing your command. Please try again.');
@@ -311,6 +388,134 @@
             button.innerHTML = originalText;
         }
     });
+
+    // Populate example commands from settings
+    async function loadExamples() {
+        const list = document.getElementById('examplesList');
+        try {
+            const resp = await fetch('/api/settings/examples');
+            const data = await resp.json();
+            const examples = (data && data.examples) ? data.examples : [];
+            list.innerHTML = '';
+            if (!examples || examples.length === 0) {
+                list.innerHTML = '<div class="text-muted">No examples defined in settings. Add some in Settings → Training Data or Examples.</div>';
+                return;
+            }
+            examples.forEach(ex => {
+                const div = document.createElement('div');
+                div.className = 'example-item';
+                div.textContent = '➤ ' + ex;
+                div.addEventListener('click', () => setCommand(ex));
+                list.appendChild(div);
+            });
+        } catch (e) {
+            console.error('Failed to load examples', e);
+            list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
+        }
+    }
+
+    // Toggle DB Search panel
+    document.addEventListener('DOMContentLoaded', () => {
+        const dbPanel = document.getElementById('dbSearchPanel');
+        const toggleDb = document.getElementById('toggleDbSearch');
+        if (toggleDb && dbPanel) {
+            toggleDb.addEventListener('click', () => {
+                if (dbPanel.style.display === 'none' || dbPanel.style.display === '') {
+                    dbPanel.style.display = 'block';
+                    toggleDb.textContent = 'Hide';
+                } else {
+                    dbPanel.style.display = 'none';
+                    toggleDb.textContent = 'Show';
+                }
+            });
+        }
+
+        // Toggle results area
+        const toggleRes = document.getElementById('toggleResultBtn');
+        const resultDiv = document.getElementById('result');
+        if (toggleRes && resultDiv) {
+            toggleRes.addEventListener('click', () => {
+                if (resultDiv.style.display === 'none' || resultDiv.style.display === '') {
+                    resultDiv.style.display = 'block';
+                    toggleRes.textContent = 'Hide Results';
+                } else {
+                    resultDiv.style.display = 'none';
+                    toggleRes.textContent = 'Show Results';
+                }
+            });
+        }
+
+        // Load examples into UI
+        loadExamples();
+        // Initialize microphone speech-to-text
+        initSpeechToText();
+    });
+
+    // Speech to Text (Microphone) using Web Speech API
+    function initSpeechToText() {
+        const micBtn = document.getElementById('micBtn');
+        const input = document.getElementById('commandInput');
+        if (!micBtn || !input) return;
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            micBtn.style.display = 'none';
+            return;
+        }
+
+        let recog = null;
+        let listening = false;
+
+        function startRecognition() {
+            recog = new SpeechRecognition();
+            recog.lang = navigator.language || 'en-US';
+            recog.interimResults = true;
+            recog.maxAlternatives = 1;
+
+            let finalTranscript = '';
+            micBtn.classList.add('btn-danger');
+            micBtn.classList.remove('btn-outline-secondary');
+            micBtn.title = 'Listening... Click to stop';
+
+            recog.onresult = (event) => {
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const r = event.results[i];
+                    if (r.isFinal) finalTranscript += r[0].transcript;
+                    else interim += r[0].transcript;
+                }
+                input.value = (finalTranscript + ' ' + interim).trim();
+            };
+
+            recog.onerror = (e) => {
+                console.error('Speech recognition error', e);
+                stopRecognition();
+                alert('Speech recognition error: ' + (e.error || 'unknown'));
+            };
+
+            recog.onend = () => {
+                stopRecognition();
+            };
+
+            recog.start();
+            listening = true;
+        }
+
+        function stopRecognition() {
+            if (recog) {
+                try { recog.stop(); } catch (e) { }
+                recog = null;
+            }
+            listening = false;
+            micBtn.classList.remove('btn-danger');
+            micBtn.classList.add('btn-outline-secondary');
+            micBtn.title = 'Speak your command';
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (!listening) startRecognition(); else stopRecognition();
+        });
+    }
 
     // SQL collapse toggle handler. Editor is collapsed by default; user expands it.
     document.getElementById('toggleSql').addEventListener('click', () => {
@@ -340,17 +545,85 @@
         const payload = { history_id: historyId, sql: editedSql, command: document.getElementById('commandInput').value };
 
         try {
+            const confirmResultEl = document.getElementById('confirmResult');
+            confirmResultEl.innerHTML = `<div class="alert alert-info">Generating result — this may take a few seconds...</div>`;
+            const confirmBtnEl = document.getElementById('confirmBtn');
+            if (confirmBtnEl) confirmBtnEl.disabled = true;
+
             const resp = await fetch('/api/confirm', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             const res = await resp.json();
+            // clear temporary message and re-enable
+            confirmResultEl.innerHTML = '';
+            if (confirmBtnEl) confirmBtnEl.disabled = false;
             if (res.error) {
-                displayError(res.error || 'Execution error');
+                // show inline error below confirm button
+                confirmResultEl.innerHTML = `<div class="error-message">${escapeHtml(res.error || 'Execution error')}</div>`;
             } else {
+                // Render formatted payload if present, otherwise show a short success / result summary
+                if (res.formatted && (res.formatted.content || res.formatted.content_type)) {
+                    try {
+                        if (res.formatted.content_type === 'text/html' || res.formatted.format === 'tabular') {
+                            confirmResultEl.innerHTML = res.formatted.content || '';
+                            try { enhanceTablesIn(confirmResultEl); } catch (e) { console.warn('enhanceTablesIn error', e); }
+                        } else if (res.formatted.format === 'csv' || res.formatted.content_type === 'text/csv') {
+                            confirmResultEl.innerHTML = `<pre>${escapeHtml(res.formatted.content || '')}</pre><a class='btn btn-sm btn-primary mt-2' href='data:text/csv;charset=utf-8,${encodeURIComponent(res.formatted.content || "")}' download='results.csv'>Download CSV</a>`;
+                        } else if (res.formatted.format === 'chart') {
+                            // For simplicity, show JSON descriptor and let user view full results in main area
+                            confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res.formatted.content || {}, null, 2))}</pre>`;
+                        } else if (res.formatted.content && (res.formatted.format === 'pdf' || res.formatted.format === 'image' || res.formatted.format === 'excel')) {
+                            // Provide a download link for base64 content
+                            const b64 = res.formatted.content;
+                            const filename = res.formatted.filename || ('results.' + (res.formatted.format === 'pdf' ? 'pdf' : 'bin'));
+                            confirmResultEl.innerHTML = `<a class='btn btn-sm btn-primary' download='${escapeHtml(filename)}' href='data:${escapeHtml(res.formatted.content_type || 'application/octet-stream')};base64,${escapeHtml(b64)}'>Download ${escapeHtml(filename)}</a>`;
+                        } else {
+                            // fallback to stringified result
+                            confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
+                        }
+                    } catch (e) {
+                        console.error('Error rendering confirm formatted result', e);
+                        confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
+                    }
+                } else {
+                    // No formatted payload provided — show brief structured result
+                    if (res.results) {
+                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Query executed successfully. Showing up to 10 rows below.</div>`;
+                        // Render small table for first 10 rows
+                        const rows = Array.isArray(res.results) ? res.results.slice(0, 10) : [];
+                        if (rows.length > 0) {
+                            let cols = Object.keys(rows[0]);
+                            // Build a DOM table so we can initialize DataTables on it
+                            const tbl = document.createElement('table');
+                            tbl.className = 'table table-sm table-striped generated-datatable';
+                            const thead = document.createElement('thead');
+                            const headerRow = document.createElement('tr');
+                            cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; headerRow.appendChild(th); });
+                            thead.appendChild(headerRow);
+                            tbl.appendChild(thead);
+                            const tbody = document.createElement('tbody');
+                            rows.forEach(r => { const tr = document.createElement('tr'); cols.forEach(c => { const td = document.createElement('td'); td.textContent = String(r[c] === null ? '' : r[c]); tr.appendChild(td); }); tbody.appendChild(tr); });
+                            tbl.appendChild(tbody);
+                            confirmResultEl.appendChild(tbl);
+                            try { enhanceTablesIn(confirmResultEl); } catch (e) { console.warn('enhanceTablesIn error', e); }
+                        }
+                    } else {
+                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Action executed successfully.</div>`;
+                    }
+                }
+
+                // Also update main result area and refresh history
                 displayResult(res);
-                // refresh history
+                // If this was a confirmed action, clear the pending preview state and restore history
+                try {
+                    window.pendingConfirmation = false;
+                    const historyPane = document.getElementById('historyList');
+                    if (historyPane) historyPane.style.display = historyPane.dataset._wasVisible === '1' ? 'block' : '';
+                    const previewBanner = document.getElementById('previewBanner');
+                    if (previewBanner) previewBanner.style.display = 'none';
+                } catch (e) { console.warn('restore history UI error', e); }
                 loadHistory();
             }
         } catch (e) {
@@ -405,6 +678,78 @@
         const confirmBtn = document.getElementById('confirmBtn');
         const hasHistoryId = (window.latestPreview && (window.latestPreview._history_id || window.latestPreview.history_id));
         confirmBtn.disabled = !(window.goClicked && hasHistoryId);
+
+        // If server returned a pre-formatted payload from the LLM, render it according to content_type/format
+        if (data.formatted) {
+            try {
+                const f = data.formatted;
+                if (f.content_type === 'text/html' || f.format === 'tabular') {
+                    resultDiv.innerHTML = f.content || '';
+                    // initialize DataTables for any table inside the formatted HTML
+                    try { enhanceTablesIn(resultDiv); } catch (e) { console.warn('enhanceTablesIn error', e); }
+                    return;
+                }
+                if (f.format === 'chart' && (typeof f.content === 'string' || typeof f.content === 'object')) {
+                    // content expected to be a chart descriptor JSON
+                    let desc = f.content;
+                    if (typeof desc === 'string') desc = JSON.parse(desc);
+                    // desc should have {type, labels, datasets}
+                    const canvas = document.createElement('canvas');
+                    canvas.id = 'resultChart';
+                    resultDiv.appendChild(canvas);
+                    new Chart(canvas.getContext('2d'), {
+                        type: desc.type || 'bar',
+                        data: {
+                            labels: desc.labels || [],
+                            datasets: desc.datasets || []
+                        },
+                        options: desc.options || { responsive: true, maintainAspectRatio: false }
+                    });
+                    return;
+                }
+                if (f.format === 'csv' || f.content_type === 'text/csv') {
+                    const pre = document.createElement('pre');
+                    pre.textContent = f.content || '';
+                    resultDiv.appendChild(pre);
+                    // create download link
+                    const a = document.createElement('a');
+                    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(f.content || '');
+                    a.download = (f.filename || 'results.csv');
+                    a.textContent = 'Download CSV';
+                    a.className = 'btn btn-sm btn-primary mt-2';
+                    resultDiv.appendChild(a);
+                    return;
+                }
+
+                // For binary formats (pdf/excel/image) the LLM may have returned base64 content
+                if (f.content && (f.format === 'pdf' || f.format === 'excel' || f.format === 'image')) {
+                    // Create blob and download link
+                    try {
+                        const b64 = f.content;
+                        const byteChars = atob(b64);
+                        const byteNumbers = new Array(byteChars.length);
+                        for (let i = 0; i < byteChars.length; i++) {
+                            byteNumbers[i] = byteChars.charCodeAt(i);
+                        }
+                        const byteArray = new Uint8Array(byteNumbers);
+                        const mime = f.content_type || (f.format === 'pdf' ? 'application/pdf' : f.format === 'image' ? 'image/png' : 'application/octet-stream');
+                        const blob = new Blob([byteArray], { type: mime });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = f.filename || ('results.' + (f.format === 'pdf' ? 'pdf' : 'bin'));
+                        a.textContent = 'Download ' + (f.filename || 'file');
+                        a.className = 'btn btn-sm btn-primary';
+                        resultDiv.appendChild(a);
+                        return;
+                    } catch (e) {
+                        console.error('Failed to render binary content', e);
+                    }
+                }
+            } catch (e) {
+                console.error('Error rendering formatted payload', e);
+            }
+        }
 
         // Display payload data (if present)
         if (data.data) {
@@ -474,7 +819,7 @@
     function displayTable(data) {
         const resultDiv = document.getElementById('result');
         const table = document.createElement('table');
-        table.className = 'result-table';
+        table.className = 'table table-sm table-striped generated-datatable';
 
         // Create header
         const thead = document.createElement('thead');
@@ -501,6 +846,39 @@
         table.appendChild(tbody);
 
         resultDiv.appendChild(table);
+        try { enhanceTablesIn(resultDiv); } catch (e) { console.warn('enhanceTablesIn error', e); }
+    }
+
+    // Initialize DataTables on any tables inside the given container.
+    function enhanceTablesIn(container) {
+        try {
+            if (window.jQuery && $.fn && $.fn.dataTable) {
+                $(container).find('table').each(function () {
+                    try {
+                        if ($.fn.dataTable.isDataTable(this)) {
+                            $(this).DataTable().draw(false);
+                        } else {
+                            $(this).DataTable({
+                                pageLength: 10,
+                                lengthChange: true,
+                                searching: true,
+                                ordering: true,
+                                paging: true,
+                                dom: 'Bfrtip',
+                                buttons: [
+                                    { extend: 'excelHtml5', text: 'Export to Excel' }
+                                ],
+                                keys: true
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('DataTable init failed for one table', e);
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('enhanceTablesIn failed', e);
+        }
     }
 
     function displayTextResult(data) {
@@ -631,5 +1009,135 @@
 
     // Load history on page load
     loadHistory();
+    // Load DB tables for the DB search panel
+    loadDbTables();
+
+    document.getElementById('dbSelectAll').addEventListener('change', (e) => {
+        const checked = e.target.checked;
+        document.querySelectorAll('#dbTablesList input[type=checkbox]').forEach(cb => cb.checked = checked);
+    });
+
+    document.getElementById('dbSearchBtn').addEventListener('click', async () => {
+        const q = document.getElementById('dbSearchInput').value.trim();
+        if (!q) { alert('Please enter search text'); return; }
+        const checked = Array.from(document.querySelectorAll('#dbTablesList input[type=checkbox]:checked')).map(i => i.value);
+        try {
+            const resp = await fetch('/api/db/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, tables: checked }) });
+            const data = await resp.json();
+            renderDbSearchResults(data);
+        } catch (e) {
+            console.error(e);
+            displayError('DB search failed');
+        }
+    });
+
+    document.getElementById('dbClearBtn').addEventListener('click', () => {
+        document.getElementById('dbSearchInput').value = '';
+        document.getElementById('dbSearchResults').innerHTML = '';
+    });
+
+    async function loadDbTables() {
+        try {
+            const resp = await fetch('/api/db/tables');
+            const data = await resp.json();
+            const list = document.getElementById('dbTablesList');
+            list.innerHTML = '';
+            (data.tables || []).forEach(t => {
+                const id = 'tbl_' + t.replace(/[^a-zA-Z0-9_]/g, '_');
+                const div = document.createElement('div');
+                div.className = 'form-check';
+                div.innerHTML = `<input class="form-check-input" type="checkbox" id="${id}" value="${t}"> <label class="form-check-label" for="${id}">${t}</label>`;
+                list.appendChild(div);
+            });
+        } catch (e) {
+            console.error('Failed to load DB tables', e);
+            document.getElementById('dbTablesList').innerHTML = '<div class="text-danger small">Failed to load table list</div>';
+        }
+    }
+
+    function renderDbSearchResults(payload) {
+        const container = document.getElementById('dbSearchResults');
+        container.innerHTML = '';
+        if (!payload || payload.error) {
+            container.innerHTML = '<div class="text-danger">No results or an error occurred.</div>';
+            return;
+        }
+        const q = payload.query;
+        const results = payload.results || [];
+        const header = document.createElement('div');
+        header.className = 'mb-2';
+        header.innerHTML = `<strong>Search results for "${escapeHtml(q)}"</strong>`;
+        container.appendChild(header);
+        results.forEach(tbl => {
+            if (!tbl.matches || tbl.matches.length === 0) return; // skip tables with no matches
+            const box = document.createElement('div');
+            box.className = 'mb-3';
+            const title = document.createElement('div');
+            title.innerHTML = `<strong>Table: ${escapeHtml(tbl.table)}</strong>`;
+            box.appendChild(title);
+
+            tbl.matches.forEach(m => {
+                const mdiv = document.createElement('div');
+                mdiv.className = 'mt-2';
+                mdiv.innerHTML = `<div><em>Column:</em> ${escapeHtml(m.column)} — <em>Matches:</em> ${m.count}</div>`;
+
+                const samplesWrap = document.createElement('div');
+                samplesWrap.className = 'small text-muted';
+                samplesWrap.textContent = 'Examples: ';
+
+                (m.samples || []).forEach((row, idx) => {
+                    const val = row[m.column] || Object.values(row)[0] || '';
+                    const text = ('' + val).substring(0, 120);
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'me-2';
+                    a.textContent = text + (('' + val).length > 120 ? '…' : '');
+                    a.addEventListener('click', (ev) => { ev.preventDefault(); showRowModal(row, tbl.table); });
+                    samplesWrap.appendChild(a);
+                });
+
+                mdiv.appendChild(samplesWrap);
+                box.appendChild(mdiv);
+            });
+
+            container.appendChild(box);
+        });
+    }
+
+    // Modal helper to show full row data
+    function showRowModal(rowObj, tableName) {
+        // Create modal content
+        const modalTitle = document.getElementById('dbRowModalTitle');
+        const modalBody = document.getElementById('dbRowModalBody');
+        modalTitle.textContent = `Table: ${tableName}`;
+        modalBody.innerHTML = '';
+
+        const tbl = document.createElement('table');
+        tbl.className = 'table table-sm table-striped';
+        const tb = document.createElement('tbody');
+        Object.keys(rowObj).forEach(k => {
+            const tr = document.createElement('tr');
+            const th = document.createElement('th');
+            th.style.width = '30%';
+            th.textContent = k;
+            const td = document.createElement('td');
+            td.textContent = rowObj[k] === null ? '' : String(rowObj[k]);
+            tr.appendChild(th);
+            tr.appendChild(td);
+            tb.appendChild(tr);
+        });
+        tbl.appendChild(tb);
+        modalBody.appendChild(tbl);
+
+        // Show bootstrap modal
+        try {
+            const modalEl = document.getElementById('dbRowModal');
+            const bsModal = new bootstrap.Modal(modalEl);
+            bsModal.show();
+        } catch (e) {
+            // Fallback: alert with JSON
+            alert(JSON.stringify(rowObj, null, 2));
+        }
+    }
 </script>
 {% endblock %}

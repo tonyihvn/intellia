@@ -84,16 +84,47 @@ class Config:
 
     @classmethod
     def get_db_config(cls):
-        if os.path.exists(cls.DB_CONFIG_FILE):
-            with open(cls.DB_CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        return {
+        """Return DB config. Priority (highest -> lowest):
+        - Environment variables (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT)
+        - Persisted DB config file (src/config/db_config.json)
+        - Built-in defaults.
+        """
+        cfg = {}
+        # Load persisted config if available
+        try:
+            if os.path.exists(cls.DB_CONFIG_FILE):
+                with open(cls.DB_CONFIG_FILE, 'r') as f:
+                    cfg = json.load(f) or {}
+        except Exception as e:
+            logging.error(f"Error loading DB config file: {e}")
+
+        # Defaults
+        defaults = {
             'host': 'localhost',
             'user': 'root',
             'password': '',
             'database': 'openmrs',
             'port': 3306
         }
+
+        # Merge file config onto defaults
+        merged = defaults.copy()
+        if isinstance(cfg, dict):
+            merged.update(cfg)
+
+        # Override with environment variables when provided
+        merged['host'] = os.getenv('DB_HOST', merged.get('host'))
+        merged['user'] = os.getenv('DB_USER', merged.get('user'))
+        merged['password'] = os.getenv('DB_PASSWORD', merged.get('password'))
+        merged['database'] = os.getenv('DB_NAME', merged.get('database'))
+        # Allow DB_PORT to be set via env var (coerce to int safely)
+        env_port = os.getenv('DB_PORT')
+        try:
+            merged['port'] = int(env_port) if env_port is not None else int(merged.get('port', 3306))
+        except Exception:
+            merged['port'] = 3306
+
+        return merged
 
     @classmethod
     def get_query_history(cls):

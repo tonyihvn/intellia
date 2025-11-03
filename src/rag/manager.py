@@ -103,11 +103,52 @@ class SimpleVectorStore:
             for doc, meta in zip(self.documents, self.metadatas)
         ]
 
+    def delete_by_text(self, text: str) -> bool:
+        """Delete documents that match the given text exactly and persist changes.
+
+        Returns True if deletion occurred (or nothing to delete), False on error.
+        """
+        try:
+            # Find indexes to keep
+            remaining = [(d, m) for d, m in zip(self.documents, self.metadatas) if d != text]
+            if len(remaining) == len(self.documents):
+                # nothing to delete
+                return True
+
+            if not remaining:
+                # No documents remain; clear files
+                self.documents = []
+                self.metadatas = []
+                self.vectors = []
+                # Overwrite files
+                self._save_to_disk()
+                return True
+
+            remaining_docs, remaining_metas = zip(*remaining)
+            self.documents = list(remaining_docs)
+            self.metadatas = list(remaining_metas)
+
+            # Refit vectorizer on remaining documents
+            try:
+                matrix = self.vectorizer.fit_transform(self.documents)
+                self.vectors = matrix.toarray().tolist()
+            except Exception:
+                # If fitting fails for any reason, clear vectors but keep docs on disk
+                self.vectors = []
+
+            self._save_to_disk()
+            return True
+        except Exception as e:
+            logging.error(f"Error deleting document from vector store '{self.name}': {str(e)}")
+            return False
+
 class RAGManager:
     def __init__(self):
         """Initialize RAG manager with simple vector stores for schema and business rules."""
         self.schema_collection = SimpleVectorStore("schema")
         self.business_rules_collection = SimpleVectorStore("business_rules")
+        # New collection to store user-provided example commands/prompts
+        self.examples_collection = SimpleVectorStore("examples")
         self.schema_context = None
     
     def set_db_context(self, db_connection):
@@ -264,6 +305,55 @@ class RAGManager:
         except Exception as e:
             logging.error(f"Error adding business rule: {str(e)}")
             return False
+
+    def add_examples(self, examples: List[Dict[str, str]]):
+        """Add example commands/prompts to the examples vector collection.
+
+        Args:
+            examples: List of dictionaries with 'text' and optional 'metadata'
+        """
+        try:
+            texts = [d['text'] for d in examples]
+            metadatas = [d.get('metadata', {}) for d in examples]
+            # Tag metadata as example source for easier filtering
+            for m in metadatas:
+                m.setdefault('source', 'examples')
+
+            self.examples_collection.add(documents=texts, metadatas=metadatas)
+            return True
+        except Exception as e:
+            logging.error(f"Error adding examples: {str(e)}")
+            return False
+
+    def get_all_examples(self) -> List[Dict]:
+        """Return all stored examples as list of {'text', 'metadata'}"""
+        try:
+            return self.examples_collection.get_all()
+        except Exception as e:
+            logging.error(f"Error getting examples: {str(e)}")
+            return []
+
+    def delete_example(self, text: str) -> bool:
+        """Delete example(s) that match the given text exactly from the examples collection."""
+        try:
+            # Use SimpleVectorStore.delete_by_text if available
+            if hasattr(self.examples_collection, 'delete_by_text'):
+                return self.examples_collection.delete_by_text(text)
+
+            # Fallback: rebuild collections without matching text
+            all_docs = self.examples_collection.get_all()
+            remaining_texts = [d['text'] for d in all_docs if d.get('text') != text]
+            remaining_metas = [d.get('metadata', {}) for d in all_docs if d.get('text') != text]
+
+            # Reset the storage by creating a fresh SimpleVectorStore and replacing files
+            self.examples_collection = SimpleVectorStore('examples')
+            if remaining_texts:
+                self.examples_collection.add(remaining_texts, remaining_metas)
+
+            return True
+        except Exception as e:
+            logging.error(f"Error deleting example: {str(e)}")
+            return False
     
     def query_knowledge(self, question: str, n_results: int = 5) -> List[Dict]:
         """Query both schema and business knowledge to find relevant information.
@@ -329,11 +419,12 @@ class RAGManager:
         try:
             return {
                 'schema': self.schema_collection.get_all(),
-                'business_rules': self.business_rules_collection.get_all()
+                'business_rules': self.business_rules_collection.get_all(),
+                'examples': self.examples_collection.get_all()
             }
         except Exception as e:
             logging.error(f"Error retrieving knowledge base: {str(e)}")
-            return {'schema': [], 'business_rules': []}
+            return {'schema': [], 'business_rules': [], 'examples': []}
 
     def is_empty(self) -> bool:
         """Return True if both collections are empty."""
