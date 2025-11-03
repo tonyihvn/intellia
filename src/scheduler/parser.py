@@ -19,13 +19,31 @@ WEEKDAYS = {
 def parse(prompt: str):
     p = prompt.strip().lower()
 
-    # Check for email instruction
-    email_match = re.search(r"send an email to ([\w@.\-,\s]+) (?:with subject '([^']+)')?(?: body '([^']+)')?", p)
+    # Check for email instruction (accept variants: 'send mail', 'send an email', 'send email')
+    email_match = re.search(r"send (?:an\s+)?(?:email|mail) to ([\w@.\-,:\s]+)(.*)", p)
     if email_match:
         to_raw = email_match.group(1).strip()
+        remainder = (email_match.group(2) or '').strip()
+        # split recipients by comma/semicolon/space but keep emails intact
         to = [x.strip() for x in re.split(r'[;,\s]+', to_raw) if x.strip()]
-        subject = email_match.group(2) or 'No subject'
-        body = email_match.group(3) or ''
+
+        # Try to extract quoted subject/body if provided
+        subj_match = re.search(r"subject\s+'([^']+)'", remainder)
+        body_match = re.search(r"body\s+'([^']+)'", remainder)
+        if subj_match:
+            subject = subj_match.group(1)
+        else:
+            subject = 'No subject'
+        if body_match:
+            body = body_match.group(1)
+        else:
+            # If no explicit body quoted, use remainder as a natural language body
+            # Remove leading connectors like 'now', 'immediately', 'telling', 'saying', 'to', etc.
+            body = re.sub(r"^(now|immediately|please|kindly)\b", '', remainder).strip()
+            body = re.sub(r"^(telling|saying|that|to)\b", '', body).strip()
+            # If still empty, fallback to an abbreviated instruction
+            if not body:
+                body = ''
     else:
         to = None
         subject = None

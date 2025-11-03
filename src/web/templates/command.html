@@ -362,10 +362,16 @@
     document.getElementById('executeRawBtn').addEventListener('click', async () => {
         const sql = document.getElementById('sqlEditor').value;
         if (!sql) { alert('No SQL to execute'); return; }
+        const ok = confirm('Execute raw SQL now? This will run the SQL against the database. Proceed?');
+        if (!ok) return;
         try {
             const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
             const data = await resp.json();
-            displayResult({ type: 'query_result', sql, results: data });
+            if (data.error) {
+                displayError(data.error);
+            } else {
+                displayResult({ type: 'query_result', sql, results: data });
+            }
         } catch (e) {
             console.error(e);
             displayError('Failed to execute SQL');
@@ -506,6 +512,17 @@
                     .map(([key, value]) => `${key}: ${value}`)
                     .join(', ')
             ).join('\n');
+        } else if (data && typeof data === 'object') {
+            // Filter out internal keys and null values for nicer display
+            const filtered = {};
+            Object.entries(data).forEach(([k, v]) => {
+                if (k.startsWith('_')) return;
+                if (v === null || v === undefined) return;
+                // Skip internal status fields not useful to the user
+                if (k === 'status' && (v === 'preview' || v === 'executing')) return;
+                filtered[k] = v;
+            });
+            pre.textContent = JSON.stringify(filtered, null, 2);
         } else {
             pre.textContent = JSON.stringify(data, null, 2);
         }

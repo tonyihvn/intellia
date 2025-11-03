@@ -180,7 +180,9 @@ class SchemaFetcher:
         """Return a list of columns as dicts with table_name and column metadata."""
         if not self.connection:
             return []
-        cursor = self.connection.cursor(dictionary=True)
+        # Use a non-dictionary cursor for SHOW TABLES to avoid returning dict rows
+        # which would make indexing by [0] fail (KeyError: 0).
+        cursor = self.connection.cursor()
         try:
             cursor.execute("SHOW TABLES")
             tables = [t[0] for t in cursor.fetchall()]

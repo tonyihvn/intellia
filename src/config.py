@@ -37,6 +37,9 @@ class Config:
     # Scheduler file
     SCHEDULES_FILE = os.path.join(CONFIG_DIR, 'schedules.json')
 
+    # SMTP/email configuration file
+    SMTP_CONFIG_FILE = os.path.join(CONFIG_DIR, 'smtp_config.json')
+
     # Email settings (can be provided via environment variables)
     EMAIL_SETTINGS = {
         'host': os.getenv('SMTP_HOST'),
@@ -46,6 +49,36 @@ class Config:
         'use_tls': os.getenv('SMTP_TLS', 'true').lower() in ('1','true','yes'),
         'from_address': os.getenv('SMTP_FROM')
     }
+
+    @classmethod
+    def get_smtp_config(cls):
+        """Return persisted SMTP config or sensible defaults from environment/EMAIL_SETTINGS."""
+        try:
+            if os.path.exists(cls.SMTP_CONFIG_FILE):
+                with open(cls.SMTP_CONFIG_FILE, 'r') as f:
+                    cfg = json.load(f)
+                    # Merge with defaults to ensure keys exist
+                    merged = cls.EMAIL_SETTINGS.copy() if isinstance(cls.EMAIL_SETTINGS, dict) else {}
+                    merged.update(cfg or {})
+                    return merged
+        except Exception as e:
+            logging.error(f"Error loading SMTP config: {e}")
+        # Fallback to environment/defaults
+        return cls.EMAIL_SETTINGS.copy() if isinstance(cls.EMAIL_SETTINGS, dict) else {}
+
+    @classmethod
+    def save_smtp_config(cls, config: dict):
+        """Persist SMTP config to disk and update runtime EMAIL_SETTINGS."""
+        try:
+            os.makedirs(os.path.dirname(cls.SMTP_CONFIG_FILE), exist_ok=True)
+            with open(cls.SMTP_CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+            # Update runtime copy used by send_email
+            cls.EMAIL_SETTINGS.update(config)
+            return True
+        except Exception as e:
+            logging.error(f"Error saving SMTP config: {e}")
+            return False
 
 
 

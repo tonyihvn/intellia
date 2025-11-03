@@ -456,6 +456,27 @@ class LLMClient:
         # If we've exhausted all retries, raise the last error
         raise Exception(f"Cloud provider failed after {retries} attempts: {last_error}")
 
+    def generate(self, prompt):
+        """General purpose text generation wrapper.
+
+        For compatibility with code that expects a `generate` method (e.g. error analysis),
+        delegate to the same provider selection but return the full textual response.
+        """
+        # Use same provider selection logic as generate_sql but return text
+        try:
+            result = self.generate_sql(prompt)
+            if isinstance(result, dict):
+                return result.get('full_response') or result.get('sql') or ''
+            return str(result)
+        except Exception as e:
+            # If SQL generation fails, at least try local generation attempt to get any textual analysis
+            try:
+                loc = self._try_local_generation(prompt)
+                return loc.get('full_response') if isinstance(loc, dict) else str(loc)
+            except Exception:
+                # Last resort: return exception message
+                return str(e)
+
     def _try_local_generation(self, prompt):
         """
         Attempts to generate SQL using local models via Ollama.

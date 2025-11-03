@@ -5,6 +5,10 @@ from ..scheduler.actions import send_email, call_api
 from ..scheduler.scheduler import get_scheduler
 from .query_handler import QueryHandler
 from ..llm.client import LLMClient
+import subprocess
+import json
+import os
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +68,9 @@ class CommandHandler:
                     sql_explanation = gen.get('explanation')
                 else:
                     sql = gen
-                if sql:
-                    # For preview only, execute readonly SQL to show results (safe for SELECTs)
-                    try:
-                        sql_results = self.query_handler.execute_sql(sql)
-                    except Exception as e:
-                        sql_error = str(e)
+                # Do NOT execute any SQL during preview. Execution only occurs on explicit confirm.
+                sql_results = None
+                sql_error = None
             except Exception as e:
                 sql_error = str(e)
 
@@ -81,13 +82,59 @@ class CommandHandler:
                 'sql': sql,
                 'sql_explanation': sql_explanation,
                 'sql_results': sql_results,
-                'sql_error': sql_error
+                'sql_error': sql_error,
+                'needs_confirmation': True
             }
 
-            # If caller requested execution, perform the action now
+            # Attempt to resolve recipients from SQL results if not explicitly provided
+            recipients = action.get('to')
+            resolved_recipients = []
+            if not recipients and sql_results:
+                # collect any values that look like email addresses from the sample results
+                for row in sql_results:
+                    if isinstance(row, dict):
+                        for v in row.values():
+                            try:
+                                if isinstance(v, str) and '@' in v:
+                                    resolved_recipients.append(v.strip())
+                            except Exception:
+                                continue
+            elif isinstance(recipients, str):
+                if '@' in recipients:
+                    resolved_recipients = [recipients]
+                else:
+                    # may be an id or username; leave unresolved for confirm step
+                    resolved_recipients = []
+            elif isinstance(recipients, list):
+                resolved_recipients = [r for r in recipients if isinstance(r, str) and '@' in r]
+
+            # Build a human-friendly planned action explanation for preview
+            planned_parts = []
+            if resolved_recipients:
+                planned_parts.append(f"Recipients: {', '.join(resolved_recipients)}")
+            else:
+                planned_parts.append("Recipients: (will be determined from database or prompt on confirmation)")
+
+            subj = action.get('parameters', {}).get('subject') or action.get('subject') or ''
+            if subj:
+                planned_parts.append(f"Subject: {subj}")
+
+            body_preview = action.get('parameters', {}).get('body') or action.get('body') or ''
+            if body_preview:
+                # truncate long bodies for preview
+                short_body = (body_preview[:300] + '...') if len(body_preview) > 300 else body_preview
+                planned_parts.append(f"Body (preview): {short_body}")
+
+            if schedule:
+                planned_parts.append(f"Schedule: {schedule}")
+
+            preview['planned_action'] = "; ".join(planned_parts)
+
+            # If caller explicitly requested execution, perform the action now
             if execute:
                 return self._execute_action_with_optional_sql(command_text, action, sql)
 
+            # Do not auto-execute otherwise; user must confirm after reviewing the planned_action
             return preview
 
         # Not an action => treat as a database query / general question
@@ -97,20 +144,15 @@ class CommandHandler:
                 gen = self.query_handler.generate_sql(command_text)
                 sql = gen if isinstance(gen, str) else gen.get('sql') if isinstance(gen, dict) else None
                 explanation = gen.get('explanation') if isinstance(gen, dict) else None
-                sample_results = None
-                sample_error = None
-                try:
-                    if sql:
-                        sample_results = self.query_handler.execute_sql(sql)
-                except Exception as e:
-                    sample_error = str(e)
 
+                # IMPORTANT: do NOT execute SQL during preview. Return SQL and explanation only.
                 return {
                     'type': 'query_preview',
                     'sql': sql,
                     'explanation': explanation,
-                    'results': sample_results,
-                    'error': sample_error
+                    'results': None,
+                    'error': None,
+                    'needs_confirmation': True
                 }
 
             # execute True => actually run the query
@@ -178,8 +220,32 @@ class CommandHandler:
                     except Exception:
                         pass
 
-                send_email(subject=subject, body=body, to=recipients or [], cc=action.get('cc', []))
-                return {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}'}
+                try:
+                    send_email(subject=subject, body=body, to=recipients or [], cc=action.get('cc', []))
+                    return {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}'}
+                except Exception as e:
+                    # fallback: try invoking the CLI script (scripts/send_email.py) as a subprocess
+                    try:
+                        payload = {
+                            'to': recipients or [],
+                            'subject': subject,
+                            'body': body,
+                            'cc': action.get('cc', []) or []
+                        }
+                        # Call python CLI script with JSON via stdin
+                        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'scripts', 'send_email.py')
+                        proc = subprocess.run([
+                            sys.executable,
+                            script_path,
+                            '--stdin'
+                        ], input=json.dumps(payload), text=True, capture_output=True, timeout=120)
+                        out = proc.stdout.strip()
+                        if proc.returncode == 0:
+                            return {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}', 'cli_output': out}
+                        else:
+                            return {'type': 'action_failed', 'error': f'CLI fallback failed: {proc.stderr or out}'}
+                    except Exception as e2:
+                        return {'type': 'action_failed', 'error': f'Failed to send email: {e} ; fallback error: {e2}'}
 
             elif action.get('type') == 'call_api':
                 result = call_api(

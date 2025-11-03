@@ -2,15 +2,15 @@
     "providers": {
         "openai": {
             "priority": 1,
-            "api_key": "",
+            "api_key": "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",
             "api_url": "https://api.openai.com/v1/chat/completions",
             "model": "gpt-3.5-turbo",
-            "enabled": true,
+            "enabled": false,
             "timeout": 30
         },
         "google": {
-            "priority": 2,
-            "api_key": "",
+            "priority": 3,
+            "api_key": "AIzaSyBW8dr6QtmWRzfPn3M5bUrRWMgQLEN80p4",
             "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
             "model": "gemini-2.0-flash",
             "enabled": true,
@@ -18,13 +18,13 @@
         },
         "vertex": {
             "priority": 3,
-            "api_key": "",
+            "api_key": "AIzaSyDaJ5DW51CFn2Q_UCO8gyut1pAZE3VWgfk",
             "api_url": "https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT/locations/LOCATION/publishers/google/models/gemini-1.5-flash:streamGenerateContent",
             "model": "gemini-1.5-flash",
             "enabled": true
         },
         "anthropic": {
-            "priority": 3,
+            "priority": 2,
             "api_key": "",
             "api_url": "https://api.anthropic.com/v1/messages",
             "model": "claude-3-opus-20240229",
@@ -33,21 +33,21 @@
         },
         "openrouter": {
             "priority": 5,
-            "api_key": "",
+            "api_key": "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",
             "api_url": "https://openrouter.ai/api/v1/chat/completions",
             "model": "openrouter/auto",
             "enabled": true
         },
         "cohere": {
             "priority": 6,
-            "api_key": "",
+            "api_key": "IOtvXuobCBhrDiecSqM1uxkNPDUhjaQTdAkERa0d",
             "api_url": "https://api.cohere.ai/v1/chat",
             "model": "command-r",
             "enabled": true
         },
         "grok": {
             "priority": 7,
-            "api_key": "",
+            "api_key": "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",
             "api_url": "https://api.x.ai/v1/chat/completions",
             "model": "grok-beta",
             "enabled": true

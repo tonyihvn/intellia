@@ -152,6 +152,48 @@
             </div>
         </div>
 
+        <!-- SMTP / Email Settings -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="h5 mb-0">SMTP / Email Settings</h3>
+            </div>
+            <div class="card-body">
+                <form id="smtpForm">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">SMTP Host</label>
+                            <input type="text" id="smtp-host" class="form-control" placeholder="smtp.example.com">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Port</label>
+                            <input type="number" id="smtp-port" class="form-control" value="587">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">From Address</label>
+                            <input type="email" id="smtp-from" class="form-control" placeholder="no-reply@example.com">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Username</label>
+                            <input type="text" id="smtp-username" class="form-control">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Password</label>
+                            <input type="password" id="smtp-password" class="form-control" placeholder="(saved)">
+                        </div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" value="" id="smtp-tls" checked>
+                        <label class="form-check-label" for="smtp-tls">
+                            Use TLS
+                        </label>
+                    </div>
+                    <button type="button" id="saveSmtpBtn" class="btn btn-primary">Save SMTP Settings</button>
+                </form>
+            </div>
+        </div>
+
         <!-- Visualization Preferences -->
         <div class="card mb-4">
             <div class="card-header">
@@ -178,6 +220,8 @@
         </div>
     </div>
 
+        
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Load current settings when page loads
@@ -185,6 +229,7 @@
             loadSettings();
             checkOllamaStatus();
             loadProviders();
+            loadSmtpSettings();
         });
 
         // ===== LLM Provider Settings =====
@@ -625,8 +670,53 @@
                 });
         }
     
-        // Load current settings when page loads
-        document.addEventListener('DOMContentLoaded', loadSettings);
+        // ===== SMTP Settings =====
+        async function loadSmtpSettings() {
+            try {
+                const res = await fetch('/api/config/smtp');
+                if (!res.ok) throw new Error('Failed to load SMTP settings');
+                const cfg = await res.json();
+                document.getElementById('smtp-host').value = cfg.host || '';
+                document.getElementById('smtp-port').value = cfg.port || 587;
+                document.getElementById('smtp-username').value = cfg.username || '';
+                // password placeholder is shown as (saved) by server
+                document.getElementById('smtp-password').placeholder = cfg.password ? '(saved)' : '';
+                document.getElementById('smtp-from').value = cfg.from_address || cfg.from || '';
+                document.getElementById('smtp-tls').checked = cfg.use_tls === undefined ? true : !!cfg.use_tls;
+            } catch (e) {
+                console.error('Error loading SMTP settings', e);
+            }
+        }
+
+        async function saveSmtpSettings() {
+            try {
+                const payload = {
+                    host: document.getElementById('smtp-host').value.trim(),
+                    port: parseInt(document.getElementById('smtp-port').value || '587', 10),
+                    username: document.getElementById('smtp-username').value.trim(),
+                    password: document.getElementById('smtp-password').value || undefined,
+                    use_tls: document.getElementById('smtp-tls').checked,
+                    from_address: document.getElementById('smtp-from').value.trim()
+                };
+
+                const resp = await fetch('/api/config/smtp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.error || 'Failed to save SMTP settings');
+                alert('SMTP settings saved');
+                // blank the password input after save
+                document.getElementById('smtp-password').value = '';
+                document.getElementById('smtp-password').placeholder = '(saved)';
+            } catch (e) {
+                console.error('Error saving SMTP settings', e);
+                alert('Error saving SMTP settings: ' + (e.message || e));
+            }
+        }
+
+        document.getElementById('saveSmtpBtn').addEventListener('click', saveSmtpSettings);
 
         async function saveProviderSettings(event, provider) {
             event.preventDefault();

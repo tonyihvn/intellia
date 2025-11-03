@@ -12,6 +12,7 @@ import mysql.connector
 from datetime import datetime
 import uuid
 from ..db.connection import get_db_connection
+from ..rag.manager import RAGManager
 
 main_routes = Blueprint('main', __name__, url_prefix='/api')
 
@@ -76,7 +77,69 @@ def handle_db_config():
             return jsonify({'error': f'Database connection failed: {str(e)}'}), 400
             
         Config.save_db_config(new_config)
+
+        # Try to bootstrap RAG schema knowledge from the newly saved DB config
+        try:
+            conn = get_db_connection()
+            if conn:
+                try:
+                    rag = RAGManager()
+                    rag.set_db_context(conn)
+                    booted = rag.bootstrap_from_db(conn)
+                    if booted:
+                        return jsonify({'message': 'Database configuration updated and RAG bootstrapped successfully'})
+                    else:
+                        return jsonify({'message': 'Database configuration updated but RAG bootstrap returned no data'})
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            logging.warning(f"Saved DB config but failed to bootstrap RAG: {e}")
+
         return jsonify({'message': 'Database configuration updated successfully'})
+
+
+@main_routes.route('/config/smtp', methods=['GET', 'POST'])
+def handle_smtp_config():
+    """Get or save SMTP configuration used for sending emails."""
+    if request.method == 'GET':
+        try:
+            cfg = Config.get_smtp_config()
+            # Hide password when returning
+            safe = cfg.copy() if isinstance(cfg, dict) else {}
+            if safe.get('password'):
+                safe['password'] = '(saved)'
+            return jsonify(safe)
+        except Exception as e:
+            logging.error(f"Error getting SMTP config: {e}")
+            return jsonify({'error': 'Failed to load SMTP config'}), 500
+
+    # POST - save
+    if not request.is_json:
+        return jsonify({'error': 'Request must be JSON'}), 415
+
+    payload = request.get_json()
+    # Basic allowed keys
+    allowed = ['host', 'port', 'username', 'password', 'use_tls', 'from_address']
+    cfg = {k: payload.get(k) for k in allowed if k in payload}
+
+    # Normalize types
+    if 'port' in cfg:
+        try:
+            cfg['port'] = int(cfg['port'])
+        except Exception:
+            pass
+    if 'use_tls' in cfg:
+        v = cfg['use_tls']
+        if isinstance(v, str):
+            cfg['use_tls'] = v.lower() in ('1', 'true', 'yes')
+
+    ok = Config.save_smtp_config(cfg)
+    if ok:
+        return jsonify({'message': 'SMTP configuration saved successfully'})
+    return jsonify({'error': 'Failed to save SMTP configuration'}), 500
 
 @main_routes.route('/history', methods=['GET', 'POST', 'DELETE'])
 def handle_history():
@@ -323,6 +386,30 @@ def preview_query():
         logging.error(f"Error generating preview: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@main_routes.route('/rag/bootstrap', methods=['POST'])
+def rag_bootstrap():
+    """Endpoint to manually trigger RAG bootstrap from the connected database."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'error': 'Could not connect to database for RAG bootstrap'}), 500
+        try:
+            rag = RAGManager()
+            rag.set_db_context(conn)
+            success = rag.bootstrap_from_db(conn)
+            if success:
+                return jsonify({'message': 'RAG bootstrap completed successfully'})
+            return jsonify({'message': 'RAG bootstrap completed but no schema documents were added'})
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        logging.error(f"Error bootstrapping RAG: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @main_routes.route('/query/history', methods=['GET'])
 def get_query_history():
     try:
@@ -332,8 +419,9 @@ def get_query_history():
         logging.error(f"Error fetching history: {e}")
         return jsonify({'error': 'Failed to load history'}), 500
 
-@main_routes.route('/query/history/<int:query_id>', methods=['GET', 'PUT', 'DELETE'])
+@main_routes.route('/query/history/<string:query_id>', methods=['GET', 'PUT', 'DELETE'])
 def manage_query_history(query_id):
+    """Manage a single history item by its ID (string-safe)."""
     history = Config.get_query_history()
     if request.method == 'GET':
         item = next((h for h in history if str(h.get('id')) == str(query_id)), None)
@@ -349,6 +437,10 @@ def manage_query_history(query_id):
         return ('', 404)
 
     elif request.method == 'DELETE':
+        # Remove any item whose id matches the provided query_id (string comparison)
         new_history = [h for h in history if not (str(h.get('id')) == str(query_id))]
+        if len(new_history) == len(history):
+            # nothing removed
+            return ('', 404)
         Config.save_query_history(new_history[:50])
         return ('', 204)

@@ -9,11 +9,45 @@ class SchemaContextManager:
 
     def refresh_schema(self):
         """Refresh the database schema context"""
+        # Perform stepwise refresh with detailed logging to aid debugging
         try:
-            tables = self.schema_fetcher.get_tables()
-            columns = self.schema_fetcher.get_columns()
-            relationships = self.schema_fetcher.get_relationships()
-            
+            # Check connection availability
+            conn = getattr(self.schema_fetcher, 'connection', None)
+            if conn is None:
+                logging.error("Schema refresh failed: no DB connection provided to SchemaFetcher")
+                return False
+
+            is_conn_ok = True
+            try:
+                # Some connectors expose is_connected(), others do not
+                if hasattr(conn, 'is_connected'):
+                    is_conn_ok = conn.is_connected()
+            except Exception:
+                # If checking connection status fails, proceed and let the calls fail with useful errors
+                is_conn_ok = True
+
+            if not is_conn_ok:
+                logging.error("Schema refresh failed: DB connection appears closed or not connected")
+                return False
+
+            try:
+                tables = self.schema_fetcher.get_tables()
+            except Exception as e:
+                logging.error(f"Failed to get tables when refreshing schema context: {e!r}")
+                return False
+
+            try:
+                columns = self.schema_fetcher.get_columns()
+            except Exception as e:
+                logging.error(f"Failed to get columns when refreshing schema context: {e!r}")
+                return False
+
+            try:
+                relationships = self.schema_fetcher.get_relationships()
+            except Exception as e:
+                logging.error(f"Failed to get relationships when refreshing schema context: {e!r}")
+                return False
+
             self.schema_context = {
                 'tables': tables,
                 'columns': columns,
@@ -22,7 +56,8 @@ class SchemaContextManager:
             logging.info("Schema context refreshed successfully")
             return True
         except Exception as e:
-            logging.error(f"Failed to refresh schema context: {str(e)}")
+            # Final fallback: log repr for easier debugging
+            logging.error(f"Failed to refresh schema context: {e!r}")
             return False
 
     def get_context(self):

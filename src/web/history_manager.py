@@ -13,11 +13,18 @@ class HistoryManager:
             history = Config.get_query_history()
             if not isinstance(history, list):
                 return []
-                
-            # Clean and validate each entry
+
+            # Clean and validate each entry. Accept items that have either 'question' or 'command'
             cleaned_history = []
             for item in history:
-                if isinstance(item, dict) and 'question' in item:
+                if not isinstance(item, dict):
+                    continue
+
+                # Normalize older entries that used 'command' to 'question' for display
+                if 'question' not in item and 'command' in item:
+                    item['question'] = item.get('command')
+
+                if 'question' in item:
                     if 'id' not in item:
                         item['id'] = str(uuid.uuid4())
                     if 'timestamp' not in item:
@@ -38,17 +45,20 @@ class HistoryManager:
         try:
             if not isinstance(history, list):
                 return False
-                
-            # Ensure all items are valid
+            # Ensure all items are valid. Accept 'command' as alias for 'question'
             cleaned_history = []
             for item in history:
-                if isinstance(item, dict) and 'question' in item:
+                if not isinstance(item, dict):
+                    continue
+                if 'question' not in item and 'command' in item:
+                    item['question'] = item.get('command')
+                if 'question' in item:
                     if 'id' not in item:
                         item['id'] = str(uuid.uuid4())
                     if 'timestamp' not in item:
                         item['timestamp'] = datetime.now().isoformat()
                     cleaned_history.append(item)
-                    
+
             return Config.save_query_history(cleaned_history[:50])  # Keep last 50
             
         except Exception as e:
@@ -109,9 +119,10 @@ class HistoryManager:
         try:
             history = HistoryManager.load_history()
             new_history = [item for item in history if str(item.get('id')) != str(item_id)]
-            if len(new_history) != len(history):
-                return HistoryManager.save_history(new_history)
-            return False
+            if len(new_history) == len(history):
+                # nothing removed
+                return False
+            return HistoryManager.save_history(new_history)
         except Exception as e:
             logging.error(f"Error deleting history item: {str(e)}")
             return False
