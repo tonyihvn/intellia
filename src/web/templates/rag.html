@@ -408,6 +408,13 @@
                 return;
             }
 
+            // If backend reported an error while fetching knowledge, show a small non-blocking alert
+            if (knowledge && knowledge.error) {
+                showRagInitAlert(knowledge.error);
+            } else {
+                clearRagInitAlert();
+            }
+
             // Update schema knowledge display
             const schemaList = document.getElementById('schema-knowledge');
             if (knowledge.schema && knowledge.schema.length > 0) {
@@ -429,11 +436,82 @@
             }
         } catch (error) {
             console.error('Error loading knowledge:', error);
-            document.getElementById('schema-knowledge').innerHTML =
-                '<div class="alert alert-danger">Error loading schema knowledge.</div>';
-            document.getElementById('business-rules').innerHTML =
-                '<div class="alert alert-danger">Error loading business rules.</div>';
+            // Non-fatal: show empty lists and a bootstrap suggestion
+            document.getElementById('schema-knowledge').innerHTML = '<div class="alert alert-light">No schema knowledge available.</div>';
+            document.getElementById('business-rules').innerHTML = '<div class="alert alert-light">No business rules available.</div>';
+            showRagInitAlert(error && error.message ? error.message : String(error));
         }
+    }
+
+    function showRagInitAlert(msg) {
+        try {
+            const container = document.querySelector('.container');
+            if (!container) return;
+            // Avoid duplicate
+            if (document.getElementById('rag-init-alert')) return;
+            const alert = document.createElement('div');
+            alert.id = 'rag-init-alert';
+            alert.className = 'alert alert-warning';
+            alert.style.marginBottom = '12px';
+            alert.innerHTML = `RAG context not available or failed to load: <strong>${escapeHtml(msg)}</strong> ` +
+                `<button class="btn btn-sm btn-primary ms-2" id="bootstrapRagBtn">Bootstrap RAG</button>`;
+            container.insertBefore(alert, container.firstChild);
+            document.getElementById('bootstrapRagBtn').addEventListener('click', async () => {
+                const btn = document.getElementById('bootstrapRagBtn');
+                const originalText = btn.innerText;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Bootstrapping...';
+
+                try {
+                    const resp = await fetch('/api/rag/bootstrap', { method: 'POST' });
+                    const result = await resp.json().catch(() => null);
+
+                    if (resp.ok && result) {
+                        if (result.success) {
+                            const msg = `Bootstrap successful! Added ${result.schema_count || 0} schema items and ${result.rules_count || 0} business rules.`;
+                            showAlert('success', msg);
+                        } else {
+                            showAlert('warning', result.message, result.details);
+                        }
+                        // Reload knowledge after bootstrapping
+                        await loadKnowledge();
+                    } else {
+                        const errorMsg = result?.error || resp.statusText || 'Bootstrap failed';
+                        const details = result?.details || 'Check server logs for more information';
+                        showAlert('danger', errorMsg, details);
+                    }
+                } catch (e) {
+                    showAlert('danger', 'Bootstrap failed', e.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
+            });
+        } catch (e) { console.warn('showRagInitAlert error', e); }
+    }
+
+    function showAlert(type, message, details = '') {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+        alertDiv.role = 'alert';
+        alertDiv.innerHTML = `
+            <strong>${message}</strong>
+            ${details ? `<br><small class="text-muted">${details}</small>` : ''}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        `;
+        document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.container').firstChild);
+
+        // Auto-dismiss success alerts after 5 seconds
+        if (type === 'success') {
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+    }
+
+    function clearRagInitAlert() {
+        const a = document.getElementById('rag-init-alert');
+        if (a) a.remove();
     }
 
     function createKnowledgeItem(item, type) {

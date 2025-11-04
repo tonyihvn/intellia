@@ -184,6 +184,11 @@
         width: 100%;
     }
 
+    /* Visualization controls are shown by default */
+    #chartControls {
+        display: block;
+    }
+
     /* Responsive: on small screens make sidebar static and stack above content */
     @media (max-width: 768px) {
         #historyPanel {
@@ -396,12 +401,28 @@
                         <div id="confirmResult" class="mt-2" style="position: relative; overflow: scroll !important;">
                         </div>
                     </div>
-                    <textarea id="sqlEditor" style="width:100%; min-height:50px; display:none;" class="mt-2"
-                        placeholder="Generated SQL will appear here"></textarea>
-                    <div style="float: right;">
-                        <div>
-                            <button id="toggleSql" class="btn btn-sm btn-outline-secondary me-2">Show SQL</button>
-                            <button id="executeRawBtn" class="btn btn-sm btn-outline-primary">Execute Raw SQL</button>
+                    <textarea id="sqlEditor" style="width:100%; min-height:50px; display:none;"
+                        class="mt-2 form-control" placeholder="Generated SQL will appear here"></textarea>
+                    <div id="chartControls">
+                        <div class="mb-2">
+                            <button id="toggleSql" class="btn btn-sm btn-outline-secondary me-2"
+                                style="display:inline-block">Show SQL</button>
+                            <button id="executeRawBtn" class="btn btn-sm btn-outline-primary"
+                                style="display:inline-block">Execute Raw SQL</button>
+                        </div>
+                        <div class="mt-2">
+                            <label for="chartTypeSelect" class="form-label small">Chart type:</label>
+                            <select id="chartTypeSelect" class="form-select form-select-sm"
+                                style="display:inline-block; width:auto; margin-right:6px">
+                                <option value="bar">Bar</option>
+                                <option value="line">Line</option>
+                                <option value="pie">Pie</option>
+                                <option value="area">Area</option>
+                            </select>
+                            <button id="showChartBtn" class="btn btn-sm btn-outline-info">Show Chart</button>
+                            <button id="exportWordBtn" class="btn btn-sm btn-outline-secondary">Export to Word</button>
+                            <button id="compressSummaryBtn" class="btn btn-sm btn-outline-primary">Compressed
+                                Summary</button>
                         </div>
                     </div>
 
@@ -618,6 +639,9 @@
             const data = await response.json();
             window.latestPreview = data;
 
+            // Update visualization controls visibility depending on returned data
+            try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
+
             // Panels are always visible now
             window.goClicked = true;
 
@@ -673,6 +697,9 @@
                     appendChat('assistant', note || 'Result returned.');
                 }
             } catch (e) { console.warn('chat render error', e); }
+
+            // Update visualization controls visibility in this path too
+            try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
 
             // Do not show result area until confirm is clicked
             document.getElementById('result').style.display = 'none';
@@ -1799,29 +1826,60 @@
         const list = modal.querySelector('.clarify-candidates');
         const info = modal.querySelector('.clarify-info');
         list.innerHTML = '';
-        info.textContent = 'We found multiple candidate tables related to your question. Please choose the most relevant one.';
+        info.textContent = 'We found multiple candidate tables related to your question. Select one or more and click Confirm.';
         if (!Array.isArray(candidates) || candidates.length === 0) {
             info.textContent = 'No candidate tables found.';
         }
-        (candidates || []).slice(0, 12).forEach(c => {
-            const btn = document.createElement('button');
-            btn.className = 'btn btn-sm btn-outline-primary m-1';
-            btn.textContent = c;
-            btn.addEventListener('click', async () => {
-                hideClarifyModal();
-                await submitWithSelection(question, [c]);
-            });
-            list.appendChild(btn);
+
+        // Add checkbox list
+        const form = document.createElement('div');
+        form.className = 'clarify-checkboxes';
+        (candidates || []).slice(0, 20).forEach((c, idx) => {
+            const id = `clarify_cb_${idx}`;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input';
+            cb.id = id;
+            cb.value = c;
+            const lbl = document.createElement('label');
+            lbl.className = 'form-check-label';
+            lbl.htmlFor = id;
+            lbl.textContent = c;
+            wrapper.appendChild(cb);
+            wrapper.appendChild(lbl);
+            form.appendChild(wrapper);
+        });
+        list.appendChild(form);
+
+        // Controls: Select all, Clear, Confirm, Use none
+        const controls = document.createElement('div');
+        controls.style.marginTop = '10px';
+
+        const selectAllBtn = document.createElement('button');
+        selectAllBtn.className = 'btn btn-sm btn-outline-secondary m-1';
+        selectAllBtn.textContent = 'Select all';
+        selectAllBtn.addEventListener('click', () => {
+            form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
         });
 
-        // Use all / None
-        const useAll = document.createElement('button');
-        useAll.className = 'btn btn-sm btn-success m-1';
-        useAll.textContent = 'Use all candidates';
-        useAll.addEventListener('click', async () => {
-            hideClarifyModal();
-            await submitWithSelection(question, candidates);
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'btn btn-sm btn-outline-secondary m-1';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', () => {
+            form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
         });
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'btn btn-sm btn-primary m-1';
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.addEventListener('click', async () => {
+            const selected = Array.from(form.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+            hideClarifyModal();
+            await submitWithSelection(question, selected);
+        });
+
         const useNone = document.createElement('button');
         useNone.className = 'btn btn-sm btn-secondary m-1';
         useNone.textContent = 'None of the above';
@@ -1829,9 +1887,13 @@
             hideClarifyModal();
             await submitWithSelection(question, []);
         });
-        list.appendChild(document.createElement('div'));
-        list.appendChild(useAll);
-        list.appendChild(useNone);
+
+        controls.appendChild(selectAllBtn);
+        controls.appendChild(clearBtn);
+        controls.appendChild(confirmBtn);
+        controls.appendChild(useNone);
+
+        list.appendChild(controls);
 
         modal.style.display = 'flex';
     }
@@ -1876,5 +1938,182 @@
             try { displayError('Failed to submit selection'); } catch (e2) { }
         }
     }
+
+    // Visualization helpers: dynamic chart rendering, export to Word, compressed summary
+    function getCurrentResultData() {
+        // Prefer executed results, then sample rows, then latest preview results
+        const lp = window.latestPreview || {};
+        const candidate = lp.results || lp.sample_rows || lp.data || lp.presentation || null;
+        if (!candidate) return null;
+        // normalize to array of objects
+        if (Array.isArray(candidate)) return candidate;
+        // if in presentation format with table.headers and rows
+        if (candidate.table && candidate.table.rows) {
+            const headers = candidate.table.headers || [];
+            return candidate.table.rows.map(r => {
+                const obj = {};
+                headers.forEach((h, i) => obj[h] = r[i]);
+                return obj;
+            });
+        }
+        return null;
+    }
+
+    function inferColumnsForChart(rows) {
+        if (!rows || !rows.length) return null;
+        const keys = Object.keys(rows[0]);
+        // find first string-like and first numeric-like column
+        let labelKey = null, valueKey = null;
+        for (const k of keys) {
+            const v = rows[0][k];
+            if (labelKey === null && typeof v === 'string') labelKey = k;
+            if (valueKey === null && (typeof v === 'number' || (!isNaN(parseFloat(v)) && isFinite(v)))) valueKey = k;
+            if (labelKey && valueKey) break;
+        }
+        // fallback: use first two columns
+        if (!labelKey && keys.length) labelKey = keys[0];
+        if (!valueKey && keys.length > 1) valueKey = keys[1];
+        return { labelKey, valueKey };
+    }
+
+    function renderChartFromRows(chartType) {
+        const rows = getCurrentResultData();
+        if (!rows || rows.length === 0) { alert('No result rows available to chart. Run the query first.'); return; }
+        const cols = inferColumnsForChart(rows);
+        if (!cols || !cols.labelKey || !cols.valueKey) { alert('Could not infer columns for chart.'); return; }
+
+        const labels = rows.map(r => r[cols.labelKey]);
+        const values = rows.map(r => Number(r[cols.valueKey]) || 0);
+
+        const container = document.getElementById('result');
+        container.innerHTML = '';
+        const canvas = document.createElement('canvas');
+        canvas.id = 'visualizationCanvas';
+        canvas.style.maxHeight = '400px';
+        container.appendChild(canvas);
+
+        try {
+            const ctx = canvas.getContext('2d');
+            // destroy existing chart if present
+            if (window._intel_chart_instance) { try { window._intel_chart_instance.destroy(); } catch (e) { } }
+            const cfg = {
+                type: chartType === 'area' ? 'line' : chartType,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: cols.valueKey,
+                        data: values,
+                        backgroundColor: chartType === 'pie' ? labels.map((_, i) => `hsl(${(i * 40) % 360} 60% 60%)`) : 'rgba(54,162,235,0.4)',
+                        borderColor: 'rgba(54,162,235,1)',
+                        fill: chartType === 'area'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            };
+            window._intel_chart_instance = new Chart(ctx, cfg);
+        } catch (e) { console.error('Chart render error', e); alert('Failed to render chart.'); }
+    }
+
+    // Show or hide visualization controls based on the returned data and prompt.
+    function updateVizControlsVisibility(data) {
+        try {
+            const controls = document.getElementById('chartControls');
+            const chartSelect = document.getElementById('chartTypeSelect');
+            const showChartBtn = document.getElementById('showChartBtn');
+            const exportWordBtn = document.getElementById('exportWordBtn');
+            const compressSummaryBtn = document.getElementById('compressSummaryBtn');
+
+            const lp = data || window.latestPreview || {};
+            // Determine if there are tabular rows available
+            let hasRows = false;
+            if (Array.isArray(lp.results) && lp.results.length > 0) hasRows = true;
+            if (lp.data && lp.data.table && Array.isArray(lp.data.table.rows) && lp.data.table.rows.length > 0) hasRows = true;
+            if (Array.isArray(lp) && lp.length > 0) hasRows = true;
+            if (lp.presentation && lp.presentation.table && Array.isArray(lp.presentation.table.rows) && lp.presentation.table.rows.length > 0) hasRows = true;
+
+            // Determine if a chart was requested or is appropriate
+            let wantsChart = false;
+            if (lp.formatted && typeof lp.formatted === 'object') {
+                const fmt = (lp.formatted.format || '').toString().toLowerCase();
+                if (fmt === 'chart' || fmt === 'plot') wantsChart = true;
+                // formatted.content could be a chart descriptor
+                if (lp.formatted.content && lp.formatted.content.type === 'chart') wantsChart = true;
+            }
+            if (lp.visualization && (lp.visualization.chart || lp.visualization.chart_type)) wantsChart = true;
+
+            // Heuristic: inspect the user prompt for chart/plot keywords when rows exist
+            const promptText = (document.getElementById('commandInput')?.value || '') || (lp.question || lp.command || '');
+            if (!wantsChart && hasRows && /\b(chart|plot|bar|pie|line|area|histogram|visualiz)/i.test(promptText)) wantsChart = true;
+
+            const showControls = hasRows && (wantsChart || lp.type === 'query_result');
+
+            if (controls) controls.style.display = showControls ? 'block' : 'none';
+            if (chartSelect) chartSelect.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
+            if (showChartBtn) showChartBtn.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
+            if (exportWordBtn) exportWordBtn.style.display = hasRows ? 'inline-block' : 'none';
+            if (compressSummaryBtn) compressSummaryBtn.style.display = !!lp && lp.type !== 'action_completed' ? 'inline-block' : 'none';
+
+            // If controls are shown and a chart is preferred, auto-render a preview chart
+            if (showControls && wantsChart) {
+                // delay slightly to allow DOM to update
+                setTimeout(() => {
+                    const t = (document.getElementById('chartTypeSelect')?.value) || 'bar';
+                    try { renderChartFromRows(t); } catch (e) { /* ignore */ }
+                }, 50);
+            }
+
+        } catch (e) { console.warn('updateVizControlsVisibility error', e); }
+    }
+
+    async function exportToWord() {
+        const rows = getCurrentResultData();
+        if (!rows || rows.length === 0) { alert('No result rows available to export.'); return; }
+        const headers = Object.keys(rows[0]);
+        const payload = { title: (document.getElementById('commandInput')?.value || 'Export').slice(0, 60), summary: '', table: { headers: headers, rows: rows.map(r => headers.map(h => r[h])) } };
+        try {
+            const resp = await fetch('/api/presentation/word', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!resp.ok) {
+                const txt = await resp.text(); throw new Error(txt || resp.statusText);
+            }
+            const blob = await resp.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = (payload.title || 'export') + '.docx'; document.body.appendChild(a); a.click(); a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (e) { console.error('Export error', e); alert('Failed to export to Word: ' + e.message); }
+    }
+
+    async function requestCompressedSummary() {
+        const q = (document.getElementById('commandInput')?.value || '') || (window.chatHistory && window.chatHistory.slice(-1)[0] && window.chatHistory.slice(-1)[0].text) || '';
+        if (!q) { alert('No question in context to summarize.'); return; }
+        try {
+            const resp = await fetch('/api/rag/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) });
+            if (!resp.ok) { const txt = await resp.text(); throw new Error(txt || resp.statusText); }
+            const data = await resp.json();
+            const sum = data.summary || data.error || 'No summary returned.';
+            appendChat('assistant', sum);
+        } catch (e) { console.error('Summary error', e); alert('Failed to get compressed summary.'); }
+    }
+
+    // Wire up new control buttons
+    document.addEventListener('DOMContentLoaded', () => {
+        const showChartBtn = document.getElementById('showChartBtn');
+        const exportWordBtn = document.getElementById('exportWordBtn');
+        const compressSummaryBtn = document.getElementById('compressSummaryBtn');
+        if (showChartBtn) showChartBtn.addEventListener('click', () => {
+            const t = document.getElementById('chartTypeSelect')?.value || 'bar'; renderChartFromRows(t);
+        });
+        if (exportWordBtn) exportWordBtn.addEventListener('click', exportToWord);
+        if (compressSummaryBtn) compressSummaryBtn.addEventListener('click', requestCompressedSummary);
+        // re-render chart on chart type change if chart already displayed
+        const chartSelect = document.getElementById('chartTypeSelect');
+        if (chartSelect) {
+            chartSelect.addEventListener('change', () => {
+                if (window._intel_chart_instance) {
+                    const t = chartSelect.value || 'bar';
+                    renderChartFromRows(t);
+                }
+            });
+        }
+    });
 </script>
 {% endblock %}

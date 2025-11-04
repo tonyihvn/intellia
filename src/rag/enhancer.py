@@ -2,6 +2,7 @@ from typing import List, Dict
 from .manager import RAGManager
 import json
 import os
+from ..config import Config
 
 class QueryEnhancer:
     def __init__(self, rag_manager: RAGManager):
@@ -19,6 +20,21 @@ class QueryEnhancer:
                 - enhanced_prompt: The enhanced prompt with relevant context
                 - relevant_info: List of relevant pieces of information used
         """
+        # Check visualization settings to see if RAG is enabled globally
+        try:
+            vis_cfg_path = os.path.join(Config.CONFIG_DIR, 'visualization.json')
+            if os.path.exists(vis_cfg_path):
+                try:
+                    with open(vis_cfg_path, 'r') as vf:
+                        vis = json.load(vf) or {}
+                        if vis.get('rag_enabled') is False:
+                            # RAG explicitly disabled: return no enhanced prompt so caller falls back to plain generation
+                            return {'enhanced_prompt': None, 'relevant_info': [], 'clarify': False}
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # Use RAG manager to build a compact context (schema + rules) and compress it via LLM
         # If the caller provided an explicit selection of tables, bias the RAG selection
         qry = question

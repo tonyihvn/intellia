@@ -628,8 +628,17 @@ class RAGManager:
         Adds one entry per table describing key columns and basic relationships.
         """
         try:
-            if not db_connection or not hasattr(db_connection, 'is_connected') or not db_connection.is_connected():
-                return False
+            # More lenient connection check
+            try:
+                # Try ping first if available
+                if hasattr(db_connection, 'ping'):
+                    db_connection.ping(reconnect=True)
+                # Fallback to is_connected for MySQL
+                elif hasattr(db_connection, 'is_connected') and not db_connection.is_connected():
+                    logging.warning("Database connection appears disconnected")
+                    return False
+            except Exception as e:
+                logging.warning(f"Connection check failed but proceeding anyway: {e}")
 
             cursor = db_connection.cursor()
             cursor.execute("SHOW TABLES")
@@ -637,21 +646,34 @@ class RAGManager:
             cursor.close()
 
             if not tables:
+                logging.warning("No tables found in database")
                 return False
 
             schema_descriptions = []
             business_rule_descriptions = []
-            for table in tables:
-                # Columns and types
-                columns_cursor = db_connection.cursor(dictionary=True)
-                try:
-                    columns_cursor.execute(f"DESCRIBE `{table}`")
-                    columns = columns_cursor.fetchall() or []
-                finally:
-                    columns_cursor.close()
+            failed_tables = []
 
-                key_cols = [c['Field'] for c in columns if c.get('Key') in ('PRI', 'MUL')]
-                sample_cols = [c['Field'] for c in columns[:10]]
+            for table in tables:
+                try:
+                    # Columns and types
+                    columns_cursor = db_connection.cursor(dictionary=True)
+                    try:
+                        columns_cursor.execute(f"DESCRIBE `{table}`")
+                        columns = columns_cursor.fetchall() or []
+                    finally:
+                        columns_cursor.close()
+
+                    if not columns:
+                        logging.warning(f"No columns found for table {table}")
+                        failed_tables.append((table, "No columns found"))
+                        continue
+
+                    key_cols = [c['Field'] for c in columns if c.get('Key') in ('PRI', 'MUL')]
+                    sample_cols = [c['Field'] for c in columns[:10]]
+                except Exception as e:
+                    logging.error(f"Error processing table {table}: {e}")
+                    failed_tables.append((table, str(e)))
+                    continue  # Skip to next table instead of failing entirely
                 col_types = [(c['Field'], c['Type']) for c in columns]
 
                 # Sample values for all columns
@@ -774,8 +796,42 @@ class RAGManager:
                 })
 
             # Add both schema and business rules
-            ok1 = self.add_schema_knowledge(schema_descriptions) if schema_descriptions else True
-            ok2 = self.add_business_rule(business_rule_descriptions) if business_rule_descriptions else True
+            result_details = {
+                'success': False,
+                'tables_processed': len(tables),
+                'tables_failed': len(failed_tables),
+                'failures': failed_tables,
+                'schema_items': len(schema_descriptions),
+                'rule_items': len(business_rule_descriptions)
+            }
+
+            # Only attempt to add if we have any successful descriptions
+            if schema_descriptions:
+                try:
+                    ok1 = self.add_schema_knowledge(schema_descriptions)
+                    result_details['schema_added'] = ok1
+                except Exception as e:
+                    logging.error(f"Error adding schema knowledge: {e}")
+                    result_details['schema_error'] = str(e)
+                    ok1 = False
+            else:
+                ok1 = True
+                result_details['schema_added'] = False
+
+            if business_rule_descriptions:
+                try:
+                    ok2 = self.add_business_rule(business_rule_descriptions)
+                    result_details['rules_added'] = ok2
+                except Exception as e:
+                    logging.error(f"Error adding business rules: {e}")
+                    result_details['rules_error'] = str(e)
+                    ok2 = False
+            else:
+                ok2 = True
+                result_details['rules_added'] = False
+
+            result_details['success'] = ok1 and ok2
+            logging.info(f"RAG bootstrap results: {json.dumps(result_details, indent=2)}")
             return ok1 and ok2
         except Exception as e:
             logging.error(f"Error bootstrapping RAG from DB: {str(e)}")

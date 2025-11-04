@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, send_file
 from ..core.query_handler import QueryHandler
 from ..core.command_handler import CommandHandler
 from ..llm.client import LLMClient
@@ -32,6 +32,11 @@ import shutil
 from pathlib import Path
 import re
 import base64
+from io import BytesIO
+try:
+    from docx import Document
+except Exception:
+    Document = None
 
 main_routes = Blueprint('main', __name__, url_prefix='/api')
 
@@ -1061,22 +1066,42 @@ def rag_bootstrap():
     try:
         conn = get_db_connection()
         if not conn:
-            return jsonify({'error': 'Could not connect to database for RAG bootstrap'}), 500
+            return jsonify({
+                'error': 'Could not connect to database for RAG bootstrap',
+                'details': 'Check database connection settings and ensure the database is running.'
+            }), 500
         try:
             rag = RAGManager()
             rag.set_db_context(conn)
             success = rag.bootstrap_from_db(conn)
+
             if success:
-                return jsonify({'message': 'RAG bootstrap completed successfully'})
-            return jsonify({'message': 'RAG bootstrap completed but no schema documents were added'})
+                knowledge = rag.get_all_knowledge()
+                return jsonify({
+                    'success': True,
+                    'message': 'RAG bootstrap completed successfully',
+                    'schema_count': len(knowledge.get('schema', [])),
+                    'rules_count': len(knowledge.get('business_rules', []))
+                })
+            
+            return jsonify({
+                'success': False,
+                'message': 'RAG bootstrap completed with warnings',
+                'details': 'Some tables may have been skipped. Check server logs for details.'
+            })
         finally:
             try:
                 conn.close()
             except Exception:
                 pass
     except Exception as e:
-        logging.error(f"Error bootstrapping RAG: {e}")
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        logging.error(f"Error bootstrapping RAG: {error_msg}")
+        return jsonify({
+            'success': False,
+            'error': 'Bootstrap process failed',
+            'details': error_msg
+        }), 500
 
 @main_routes.route('/query/history', methods=['GET'])
 def get_query_history():
@@ -1297,3 +1322,50 @@ def get_members_report():
     except Exception as e:
         logging.error(f"Error generating members report: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@main_routes.route('/presentation/word', methods=['POST'])
+def export_to_word():
+    """Create a simple Word (.docx) document from provided JSON results and return it as attachment.
+
+    Expected JSON: { title: str, summary: str (optional), table: { headers: [str], rows: [[val]] } }
+    """
+    if not request.is_json:
+        return jsonify({'error': 'Request must be JSON'}), 415
+    if Document is None:
+        return jsonify({'error': 'python-docx is not installed on the server'}), 500
+
+    data = request.get_json()
+    title = data.get('title') or 'Export'
+    summary = data.get('summary')
+    table = data.get('table') or {}
+    headers = table.get('headers') or []
+    rows = table.get('rows') or []
+
+    try:
+        doc = Document()
+        doc.add_heading(title, level=1)
+        if summary:
+            doc.add_paragraph(str(summary))
+
+        if headers and rows:
+            tbl = doc.add_table(rows=1, cols=len(headers))
+            hdr_cells = tbl.rows[0].cells
+            for i, h in enumerate(headers):
+                hdr_cells[i].text = str(h)
+            for r in rows:
+                row_cells = tbl.add_row().cells
+                for i, cell_val in enumerate(r):
+                    try:
+                        row_cells[i].text = str(cell_val)
+                    except Exception:
+                        row_cells[i].text = ''
+
+        bio = BytesIO()
+        doc.save(bio)
+        bio.seek(0)
+
+        filename = f"{title.replace(' ', '_')}.docx"
+        return send_file(bio, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    except Exception as e:
+        return jsonify({'error': f'Failed to create Word document: {e}'}), 500

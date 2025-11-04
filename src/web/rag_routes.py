@@ -197,8 +197,19 @@ def manage_sources():
 @rag_routes.route('/api/rag/knowledge', methods=['GET'])
 def get_all_knowledge():
     """Endpoint to get all stored knowledge."""
-    knowledge = rag_manager.get_all_knowledge()
-    return jsonify(knowledge)
+    try:
+        knowledge = rag_manager.get_all_knowledge()
+        # Ensure keys exist
+        knowledge = knowledge or {}
+        return jsonify({
+            'schema': knowledge.get('schema', []),
+            'business_rules': knowledge.get('business_rules', []),
+            'examples': knowledge.get('examples', []),
+        })
+    except Exception as e:
+        # Return empty lists rather than an error status so the UI can show empty state
+        logging.warning(f"Failed to load RAG knowledge: {e}")
+        return jsonify({'schema': [], 'business_rules': [], 'examples': [], 'error': str(e)})
 
 
 @rag_routes.route('/api/rag/clarify', methods=['POST'])
@@ -238,3 +249,22 @@ def clarify_selection():
 
     compact = rag_manager.get_compact_context(augmented)
     return jsonify(compact)
+
+
+@rag_routes.route('/api/rag/summarize', methods=['POST'])
+def summarize_compact_context():
+    """Return the compact context summary for a question (optionally biased by selected_tables)."""
+    if not request.is_json:
+        return jsonify({'error': 'Request must be JSON'}), 415
+    data = request.get_json()
+    question = data.get('question') or ''
+    selected = data.get('selected_tables') or []
+
+    if selected and isinstance(selected, (list, tuple)):
+        question = f"{question}. Use tables: {', '.join(selected)}"
+
+    try:
+        compact = rag_manager.get_compact_context(question)
+        return jsonify({'summary': compact.get('summary', ''), 'tables': compact.get('tables', []), 'rules': compact.get('rules', [])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
