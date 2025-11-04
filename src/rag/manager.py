@@ -497,8 +497,9 @@ class RAGManager:
                 return False
 
             schema_descriptions = []
+            business_rule_descriptions = []
             for table in tables:
-                # Columns
+                # Columns and types
                 columns_cursor = db_connection.cursor(dictionary=True)
                 try:
                     columns_cursor.execute(f"DESCRIBE `{table}`")
@@ -508,6 +509,24 @@ class RAGManager:
 
                 key_cols = [c['Field'] for c in columns if c.get('Key') in ('PRI', 'MUL')]
                 sample_cols = [c['Field'] for c in columns[:10]]
+                col_types = [(c['Field'], c['Type']) for c in columns]
+
+                # Sample values for all columns
+                sample_values = {}
+                try:
+                    sample_cursor = db_connection.cursor(dictionary=True)
+                    sample_cursor.execute(f"SELECT * FROM `{table}` LIMIT 5")
+                    rows = sample_cursor.fetchall() or []
+                    for col in [c['Field'] for c in columns]:
+                        # Collect up to 3 sample values for each column
+                        sample_values[col] = [str(row.get(col)) for row in rows if row.get(col) is not None][:3]
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        sample_cursor.close()
+                    except Exception:
+                        pass
 
                 # Relationships
                 fk_cursor = db_connection.cursor()
@@ -539,9 +558,23 @@ class RAGManager:
                     'metadata': {'table': table}
                 })
 
-            if schema_descriptions:
-                return self.add_schema_knowledge(schema_descriptions)
-            return False
+                # Business rule: describe columns, types, and sample values
+                br_lines = [f"Business Rule for table '{table}':"]
+                for col, typ in col_types:
+                    samples = sample_values.get(col, [])
+                    sample_str = f"; Sample values: {', '.join(samples)}" if samples else ""
+                    br_lines.append(f"- Column '{col}' (type: {typ}){sample_str}")
+                if rels:
+                    br_lines.append("- Relationships: " + "; ".join(rels))
+                business_rule_descriptions.append({
+                    'text': "\n".join(br_lines),
+                    'metadata': {'table': table}
+                })
+
+            # Add both schema and business rules
+            ok1 = self.add_schema_knowledge(schema_descriptions) if schema_descriptions else True
+            ok2 = self.add_business_rule(business_rule_descriptions) if business_rule_descriptions else True
+            return ok1 and ok2
         except Exception as e:
             logging.error(f"Error bootstrapping RAG from DB: {str(e)}")
             return False
