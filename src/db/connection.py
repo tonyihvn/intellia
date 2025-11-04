@@ -1,4 +1,5 @@
 import mysql.connector
+import logging
 from ..config import Config
 
 def get_db_connection():
@@ -7,12 +8,25 @@ def get_db_connection():
     """
     try:
         # Get the current database configuration
-        db_config = Config.get_db_config()
+        config = Config()
+        db_config = config.get_db_config()
+        
+        if not db_config:
+            logging.error("No database configuration found")
+            return None
+            
         connection = mysql.connector.connect(**db_config)
         
         if connection.is_connected():
+            logging.info("Successfully connected to the database")
             return connection
+        else:
+            logging.error("Failed to connect to database - connection not established")
+            return None
+            
     except mysql.connector.Error as e:
-        print(f"Error connecting to MySQL: {e}")
+        logging.error(f"Error connecting to MySQL: {e}")
         return None
-    return None
+    except Exception as e:
+        logging.error(f"Unexpected error while connecting to database: {e}")
+        return None

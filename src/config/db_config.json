@@ -1,7 +1,7 @@
 {
     "host": "localhost",
     "port": 3306,
-    "database": "openmrs",
+    "database": "crmfct2",
     "user": "root",
     "password": "root"
 }

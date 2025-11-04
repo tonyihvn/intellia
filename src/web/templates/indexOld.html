@@ -148,6 +148,18 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let latestPreview = null;
+    // simple chat history kept in-memory so this older UI can still forward context
+    // to the server; entries: { role: 'user'|'assistant', text: '...' }
+    if (!window.chatHistory) window.chatHistory = [];
+
+    function isLikelySQL(s) {
+        if (!s || typeof s !== 'string') return false;
+        const trimmed = s.trim().toLowerCase();
+        if (trimmed.startsWith('select') || trimmed.startsWith('with') || trimmed.startsWith('insert') || trimmed.startsWith('update') || trimmed.startsWith('delete')) return true;
+        if (trimmed.startsWith('```sql') || trimmed.startsWith('```')) return true;
+        if (/\bfrom\b/.test(trimmed) && /\bselect\b/.test(trimmed)) return true;
+        return false;
+    }
 
     function renderPreview(preview) {
         const resultDiv = document.getElementById('result');
@@ -163,7 +175,7 @@
         latestPreview = preview;
 
         if (preview.type === 'query_preview') {
-            if (preview.sql) {
+            if (preview.sql && isLikelySQL(preview.sql) && !preview.error) {
                 document.getElementById('sqlEditor').value = preview.sql;
                 document.getElementById('generatedSQL').style.display = 'block';
                 document.getElementById('executeBtn').disabled = false;
@@ -185,7 +197,7 @@
             resultDiv.innerHTML = actionHtml;
 
             if (preview.sql) {
-                document.getElementById('sqlEditor').value = preview.sql;
+                if (isLikelySQL(preview.sql) && !preview.sql_error) document.getElementById('sqlEditor').value = preview.sql;
                 document.getElementById('generatedSQL').style.display = 'block';
                 document.getElementById('executeBtn').disabled = false;
                 document.getElementById('saveBtn').disabled = false;
@@ -244,10 +256,13 @@
             const question = document.getElementById('questionInput').value.trim();
             if (!question) { alert('Please enter a question.'); return; }
 
+            // append user's turn to local chat history
+            window.chatHistory.push({ role: 'user', text: question });
+            const payload = { question, conversation: window.chatHistory.slice(-50) };
             const response = await fetch('/api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question })
+                body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error('Server error');
             const data = await response.json();
@@ -255,6 +270,9 @@
             // store latest preview including history id
             renderPreview(data);
             latestPreview = data;
+            // append assistant reply summary into local history (best-effort)
+            const assistantText = data.response || data.explanation || data.sql || '';
+            if (assistantText) window.chatHistory.push({ role: 'assistant', text: assistantText });
         } catch (err) {
             console.error(err);
             alert('Error generating preview: ' + err.message);

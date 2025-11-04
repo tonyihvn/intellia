@@ -1,0 +1,7 @@
+{
+  "host": "smtp.gmail.com",
+  "port": 465,
+  "username": "anthonynwokoma1@gmail.com",
+  "use_tls": true,
+  "from_address": "anthonynwokoma1@gmail.com"
+}

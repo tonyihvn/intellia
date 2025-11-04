@@ -58,6 +58,15 @@
             </div>
             <div class="card-body">
                 <div>
+                    <!-- Quick SQL editor for immediate commands against selected table -->
+                    <div class="mb-3" id="quickSqlPanel" style="display:none">
+                        <label class="form-label">Quick SQL (execute against selected table)</label>
+                        <textarea id="quickSql" class="form-control" rows="4"
+                            placeholder="Run a quick SQL statement (e.g. SELECT * FROM table LIMIT 100)"></textarea>
+                        <div class="mt-2">
+                            <button id="execQuickSqlBtn" class="btn btn-sm btn-primary">Execute Quick SQL</button>
+                        </div>
+                    </div>
                     <div id="rowsContainer">Select a table to view rows.</div>
                     <nav aria-label="Page navigation" class="mt-2">
                         <ul class="pagination" id="pager"></ul>
@@ -139,6 +148,11 @@
         currentPage = 1;
         document.getElementById('tableTitle').textContent = table;
         document.getElementById('tableBrief').textContent = '';
+        // show quick SQL panel and prefill a sensible default SELECT for quick editing
+        try {
+            document.getElementById('quickSqlPanel').style.display = 'block';
+            document.getElementById('quickSql').value = `SELECT * FROM ${table} LIMIT 100`;
+        } catch (e) { }
         await loadTableMeta();
         await loadRows();
     }
@@ -197,6 +211,8 @@
 
     async function loadRows(page = 1) {
         if (!currentTable) return;
+        // track current page
+        currentPage = page || 1;
         const rowsContainer = document.getElementById('rowsContainer');
         rowsContainer.innerHTML = 'Loading rows...';
         try {
@@ -242,39 +258,50 @@
             // initialize DataTable
             try {
                 if (window.jQuery && $.fn && $.fn.dataTable) {
+                    // We are using server-side pagination (we fetch one page at a time).
+                    // Disable DataTables' internal paging so it doesn't conflict with server paging.
                     if ($.fn.dataTable.isDataTable(tbl)) {
-                        $(tbl).DataTable().clear().rows.add(rows).draw();
-                    } else {
-                        $(tbl).DataTable({
-                            pageLength: 25,
-                            lengthChange: true,
-                            searching: true,
-                            ordering: true,
-                            paging: true,
-                            dom: 'Bfrtip',
-                            buttons: [{ extend: 'excelHtml5', text: 'Export to Excel' }],
-                            keys: true,
-                            orderCellsTop: true,
-                            // wire up per-column filters after init
-                            initComplete: function () {
-                                var api = this.api();
-                                // For each column, hook up the input in the second header row
-                                api.columns().every(function (colIdx) {
-                                    var column = this;
-                                    var input = $(api.table().header()).find('tr:eq(1) th').eq(colIdx).find('input');
-                                    $(input).on('keyup change clear', function () {
-                                        var val = this.value;
-                                        if (column.search() !== val) {
-                                            column.search(val).draw();
-                                        }
-                                    });
-                                });
-                            }
-                        });
+                        try { $(tbl).DataTable().clear().rows.add(rows).draw(); } catch (e) { $(tbl).DataTable().destroy(); }
                     }
+                    $(tbl).DataTable({
+                        // Disable client-side paging since we're loading one server page at a time
+                        paging: false,
+                        lengthChange: false,
+                        searching: true,
+                        ordering: true,
+                        dom: 'Bfrtip',
+                        buttons: [{ extend: 'excelHtml5', text: 'Export to Excel' }],
+                        keys: true,
+                        orderCellsTop: true,
+                        // wire up per-column filters after init
+                        initComplete: function () {
+                            var api = this.api();
+                            // For each column, hook up the input in the second header row
+                            api.columns().every(function (colIdx) {
+                                var column = this;
+                                var input = $(api.table().header()).find('tr:eq(1) th').eq(colIdx).find('input');
+                                $(input).on('keyup change clear', function () {
+                                    var val = this.value;
+                                    if (column.search() !== val) {
+                                        column.search(val).draw();
+                                    }
+                                });
+                            });
+                        }
+                    });
                 }
+
+                // Always render our server-side pager based on total rows/pageSize
+                try {
+                    const pages = Math.max(1, Math.ceil((total || 0) / pageSize));
+                    renderPager(currentPage, pages);
+                } catch (e) { console.warn('renderPager error', e); }
             } catch (e) {
                 console.warn('Failed to initialize DataTable', e);
+                try {
+                    const pages = Math.max(1, Math.ceil((total || 0) / pageSize));
+                    renderPager(currentPage, pages);
+                } catch (e) { console.warn('renderPager error', e); }
             }
         } catch (e) {
             console.error(e);
@@ -305,6 +332,58 @@
             await loadRows(currentPage);
         } else {
             loadTables();
+        }
+    });
+
+    // Execute quick SQL entered in DB browser quick SQL panel
+    document.getElementById('execQuickSqlBtn').addEventListener('click', async () => {
+        const sql = document.getElementById('quickSql').value.trim();
+        if (!sql) { alert('Please enter SQL to execute'); return; }
+        try {
+            const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+            if (!resp.ok) {
+                const txt = await resp.text();
+                alert('Execution failed: ' + txt);
+                return;
+            }
+            const data = await resp.json();
+            // render results in main rows container
+            const rowsContainer = document.getElementById('rowsContainer');
+            if (Array.isArray(data) && data.length > 0) {
+                // reuse loadRows rendering logic by building a fake payload
+                const fake = { rows: data.slice(0, pageSize), total: data.length };
+                // temporarily set currentTable to reflect custom query
+                rowsContainer.innerHTML = '';
+                // call loadRows UI-less path: render table directly
+                try {
+                    const cols = Object.keys(fake.rows[0]);
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'table-responsive';
+                    const tbl = document.createElement('table');
+                    tbl.className = 'table table-sm table-bordered generated-datatable';
+                    const thead = document.createElement('thead');
+                    const trHead = document.createElement('tr');
+                    cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; trHead.appendChild(th); });
+                    thead.appendChild(trHead);
+                    tbl.appendChild(thead);
+                    const tbody = document.createElement('tbody');
+                    fake.rows.forEach(r => { const tr = document.createElement('tr'); cols.forEach(c => { const td = document.createElement('td'); td.textContent = (r[c] === null || r[c] === undefined) ? '' : String(r[c]); tr.appendChild(td); }); tbody.appendChild(tr); });
+                    tbl.appendChild(tbody);
+                    wrapper.appendChild(tbl);
+                    rowsContainer.appendChild(wrapper);
+                    try { $(tbl).DataTable({ paging: false, lengthChange: false, dom: 'Bfrtip', buttons: [{ extend: 'excelHtml5', text: 'Export to Excel' }], orderCellsTop: true }); } catch (e) { }
+                } catch (e) { rowsContainer.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>'; }
+            } else if (data && data.results) {
+                // if response is shaped { results: [...] }
+                const rows = data.results;
+                const rowsContainer = document.getElementById('rowsContainer');
+                rowsContainer.innerHTML = '<pre>' + JSON.stringify(rows, null, 2) + '</pre>';
+            } else {
+                alert('Query executed. No tabular results returned.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Quick SQL execution failed');
         }
     });
 

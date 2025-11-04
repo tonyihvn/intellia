@@ -1,516 +1,717 @@
 {% extends "base.html" %}
+{% block title %}RAG Management{% endblock %}
+{% block extra_css %}
+<style>
+    .navbar.navbar-expand-lg.navbar-dark.bg-primary.mb-4 {
+        color: black !important;
+    }
+
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        /* background: white; */
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+        color: #2c3e50;
+        margin-bottom: 30px;
+    }
+
+    .section {
+        margin-bottom: 30px;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+
+    .metadata-field {
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 4px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-right: 10px;
+    }
+
+    .btn-primary {
+        background: #3498db;
+        color: white;
+    }
+
+    .btn-danger {
+        background: #e74c3c;
+        color: white;
+    }
+
+    .knowledge-list {
+        margin-top: 20px;
+    }
+
+    .knowledge-item {
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        margin-bottom: 10px;
+    }
+
+    .knowledge-text {
+        margin-bottom: 10px;
+    }
+
+    .metadata-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+
+    .metadata-tag {
+        background: #3498db;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+    }
+
+    .tab-container {
+        margin-bottom: 20px;
+    }
+
+    .tab {
+        padding: 10px 20px;
+        background: #f8f9fa;
+        border: none;
+        cursor: pointer;
+    }
+
+    .tab.active {
+        background: #3498db;
+        color: white;
+    }
+
+    .tab-content {
+        display: none;
+    }
+
+    .tab-content.active {
+        display: block;
+    }
+</style>
+{% endblock %}
+
+
 {% block content %}
-    <title>OpenMRS Query Interface - RAG Management</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
+<div class="container">
+    <h1>Database Knowledge Management</h1>
 
-        .navbar.navbar-expand-lg.navbar-dark.bg-primary.mb-4 {
-            color: black !important;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            /* background: white; */
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        h1 {
-            color: #2c3e50;
-            margin-bottom: 30px;
-        }
-
-        .section {
-            margin-bottom: 30px;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-
-        .section h2 {
-            color: #3498db;
-            margin-top: 0;
-        }
-
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-
-        textarea {
-            width: 100%;
-            min-height: 100px;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            resize: vertical;
-        }
-
-        .metadata-fields {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .metadata-field {
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
-        }
-
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-right: 10px;
-        }
-
-        .btn-primary {
-            background: #3498db;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #e74c3c;
-            color: white;
-        }
-
-        .knowledge-list {
-            margin-top: 20px;
-        }
-
-        .knowledge-item {
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            margin-bottom: 10px;
-        }
-
-        .knowledge-text {
-            margin-bottom: 10px;
-        }
-
-        .metadata-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-        }
-
-        .metadata-tag {
-            background: #3498db;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-        }
-
-        .tab-container {
-            margin-bottom: 20px;
-        }
-
-        .tab {
-            padding: 10px 20px;
-            background: #f8f9fa;
-            border: none;
-            cursor: pointer;
-        }
-
-        .tab.active {
-            background: #3498db;
-            color: white;
-        }
-
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-    </style>
-
-    <div class="container">
-        <h1>Database Knowledge Management</h1>
-        
-        <!-- Scheduler Section -->
-        <div class="section">
-            <h2>Schedules</h2>
-            <div class="form-group">
-                <label for="nl-schedule">Create schedule (natural language):</label>
-                <input type="text" id="nl-schedule" class="form-control" placeholder="e.g. Send an email every Monday at 09:00 to team@example.com with subject 'Weekly Report'">
-            </div>
-            <div class="form-group">
-                <button class="btn btn-primary" onclick="parseSchedule()">Parse</button>
-                <button class="btn btn-primary" onclick="createScheduleFromNL()">Create Schedule</button>
-                <button class="btn" onclick="listSchedules()">List Schedules</button>
-            </div>
-            <div id="schedule-parse-result" style="margin-top:10px"></div>
-            <div id="schedules-list" style="margin-top:10px"></div>
+    <!-- Scheduler Section -->
+    <div class="section">
+        <h2>Schedules</h2>
+        <div class="form-group" style="margin-bottom: 5px;">
+            <label for="nl-schedule">Create schedule (natural language):</label>
+            <input type="text" id="nl-schedule" class="form-control"
+                placeholder="e.g. Send an email every Monday at 09:00 to team@example.com with subject 'Weekly Report'">
         </div>
-        <!-- External Sources Section -->
-        <div class="section">
-            <h2>External Context Sources</h2>
-            <div class="form-group">
-                <label for="sourceUrl">Add Source URL:</label>
-                <div class="input-group">
-                    <input type="text" id="sourceUrl" class="form-control" placeholder="Enter source URL">
-                    <div class="input-group-append">
-                        <button class="btn btn-primary" onclick="addSource()">Add Source</button>
-                    </div>
+        <div class="form-group">
+            <button class="btn btn-primary" onclick="parseSchedule()">Parse</button>
+            <button class="btn btn-primary" onclick="createScheduleFromNL()">Create Schedule</button>
+            <button class="btn" onclick="listSchedules()">List Schedules</button>
+        </div>
+        <div id="schedule-parse-result" style="margin-top:10px"></div>
+        <div id="schedules-list" style="margin-top:10px"></div>
+    </div>
+    <!-- External Sources Section -->
+    <div class="section">
+        <h2>External Context Sources</h2>
+        <div class="form-group">
+            <label for="sourceUrl">Add Source URL:</label>
+            <div class="input-group">
+                <input type="text" id="sourceUrl" class="form-control" placeholder="Enter source URL">
+                <div class="input-group-append">
+                    <button class="btn btn-primary" onclick="addSource()">Add Source</button>
                 </div>
             </div>
             <div id="sources-list" class="mt-3">
                 <!-- Sources will be listed here -->
             </div>
-        </div>
 
-        <div class="tab-container">
-            <button class="tab active" onclick="switchTab('add')">Add Knowledge</button>
-            <button class="tab" onclick="switchTab('view')">View Knowledge</button>
-        </div>
+            <div class="tab-container">
+                <button class="tab active" onclick="switchTab('add')">Add Knowledge</button>
+                <button class="tab" onclick="switchTab('view')">View Knowledge</button>
+            </div>
 
-        <div id="add-tab" class="tab-content active">
-            <!-- Schema Knowledge Section -->
-            <div class="section">
-                <h2>Add Schema Knowledge</h2>
-                <div class="form-group">
-                    <label for="schema-text">Description:</label>
-                    <textarea id="schema-text" placeholder="Describe a table, column, or relationship in the database. Example: The obs table stores all patient observations including vital signs, lab results, and answers to questions."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Metadata:</label>
-                    <div class="metadata-fields">
-                        <div class="metadata-field">
-                            <label for="schema-table">Table Name:</label>
-                            <input type="text" id="schema-table">
-                        </div>
-                        <div class="metadata-field">
-                            <label for="schema-column">Column Name:</label>
-                            <input type="text" id="schema-column">
+            <div id="add-tab" class="tab-content active">
+                <!-- Schema Knowledge Section -->
+                <div class="section">
+                    <h2>Add Schema Knowledge</h2>
+                    <div class="form-group">
+                        <label for="schema-text">Description:</label>
+                        <textarea id="schema-text" class="form-control"
+                            placeholder="Describe a table, column, or relationship in the database. Example: The obs table stores all patient observations including vital signs, lab results, and answers to questions."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Metadata:</label>
+                        <div class="metadata-fields row">
+                            <div class="metadata-field col-md-6">
+                                <label for="schema-table">Table Name:</label>
+                                <input type="text" id="schema-table" class="form-control">
+                            </div>
+                            <div class="metadata-field col-md-6">
+                                <label for="schema-column">Column Name:</label>
+                                <input type="text" id="schema-column" class="form-control">
+                            </div>
                         </div>
                     </div>
+                    <button class="btn btn-primary" onclick="addSchemaKnowledge()">Add Schema Knowledge</button>
                 </div>
-                <button class="btn btn-primary" onclick="addSchemaKnowledge()">Add Schema Knowledge</button>
-            </div>
 
-            <!-- Business Rules Section -->
-            <div class="section">
-                <h2>Add Business Rules</h2>
-                <div class="form-group">
-                    <label for="rule-text">Rule Description:</label>
-                    <textarea id="rule-text" placeholder="Describe a business rule or data relationship. Example: Active patients must have a non-voided person record and at least one non-voided encounter."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Metadata:</label>
-                    <div class="metadata-fields">
-                        <div class="metadata-field">
-                            <label for="rule-category">Category:</label>
-                            <input type="text" id="rule-category" class="form-control">
-                        </div>
-                        <div class="metadata-field">
-                            <label for="rule-priority">Priority:</label>
-                            <select id="rule-priority" class="form-control">
-                                <option value="high">High</option>
-                                <option value="medium">Medium</option>
-                                <option value="low">Low</option>
-                            </select>
+                <!-- Business Rules Section -->
+                <div class="section">
+                    <h2>Add Business Rules</h2>
+                    <div class="form-group">
+                        <label for="rule-text">Rule Description:</label>
+                        <textarea id="rule-text" class="form-control"
+                            placeholder="Describe a business rule or data relationship. Example: Active patients must have a non-voided person record and at least one non-voided encounter."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Metadata:</label>
+                        <div class="metadata-fields row">
+                            <div class="metadata-field col-md-6">
+                                <label for="rule-category">Category:</label>
+                                <input type="text" id="rule-category" class="form-control">
+                            </div>
+                            <div class="metadata-field col-md-6">
+                                <label for="rule-priority">Priority:</label>
+                                <select id="rule-priority" class="form-control">
+                                    <option value="high">High</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="low">Low</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <button class="btn btn-primary" onclick="addBusinessRule()">Add Business Rule</button>
-            </div>
-        </div>
-
-        <div id="view-tab" class="tab-content">
-            <!-- View Knowledge Section -->
-            <div class="section">
-                <h2>Schema Knowledge</h2>
-                <div id="schema-knowledge" class="knowledge-list">
-                    <!-- Schema knowledge items will be inserted here -->
+                    <button class="btn btn-primary" onclick="addBusinessRule()">Add Business Rule</button>
                 </div>
             </div>
 
-            <div class="section">
-                <h2>Business Rules</h2>
-                <div id="business-rules" class="knowledge-list">
-                    <!-- Business rules will be inserted here -->
+            <div id="view-tab" class="tab-content">
+                <!-- View Knowledge Section -->
+                <div class="section">
+                    <h2>Schema Knowledge</h2>
+                    <div id="schema-knowledge" class="knowledge-list">
+                        <!-- Schema knowledge items will be inserted here -->
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>Business Rules</h2>
+                    <div id="business-rules" class="knowledge-list">
+                        <!-- Business rules will be inserted here -->
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
+<!-- End main content -->
+{% endblock %}
 
-    <script>
-        // Load all knowledge and sources when page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            loadKnowledge();
-            loadSources();
+{% block extra_js %}
+<script>
+    // Load all knowledge and sources when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+        loadKnowledge();
+        loadSources();
+    });
+
+    async function loadSources() {
+        try {
+            const response = await fetch('/api/rag/sources');
+            const data = await response.json();
+            const sourcesList = document.getElementById('sources-list');
+            sourcesList.innerHTML = '';
+
+            const sources = data.sources || [];
+            if (sources.length === 0) {
+                sourcesList.innerHTML = '<div class="alert alert-light">No external sources added yet.</div>';
+                return;
+            }
+
+            sources.forEach(source => {
+                const div = document.createElement('div');
+                div.className = 'alert alert-info d-flex justify-content-between align-items-center';
+                const sourceId = source.url || source.filename;
+                div.innerHTML = `
+                        <div>
+                            <i class="fas fa-link"></i> ${sourceId}
+                        </div>
+                        <button class="btn btn-sm btn-danger" onclick="deleteSource('${sourceId.replace(/'/g, "\\'")}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    `;
+                sourcesList.appendChild(div);
+            });
+        } catch (error) {
+            console.error('Error loading sources:', error);
+            sourcesList.innerHTML = '<div class="alert alert-danger">Error loading sources.</div>';
+        }
+    }
+
+    async function addSource() {
+        const sourceUrl = document.getElementById('sourceUrl').value.trim();
+        if (!sourceUrl) {
+            alert('Please enter a source URL');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/rag/sources', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url: sourceUrl })
+            });
+
+            if (response.ok) {
+                document.getElementById('sourceUrl').value = '';
+                await loadSources();  // Reload the sources list
+            } else {
+                const error = await response.json();
+                alert(error.message || 'Failed to add source');
+            }
+        } catch (error) {
+            console.error('Error adding source:', error);
+            alert('Error adding source. Please try again.');
+        }
+    }
+
+    async function deleteSource(sourceId) {
+        if (!confirm('Are you sure you want to delete this source?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/rag/sources', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ source: sourceId })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to delete source');
+            }
+
+            await loadSources(); // Reload the sources list
+        } catch (error) {
+            console.error('Error deleting source:', error);
+            alert('Error deleting source: ' + error.message);
+        }
+    }
+
+    async function deleteKnowledge(type, id) {
+        if (!confirm('Are you sure you want to delete this item?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/rag/${type}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ id: id })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to delete item');
+            }
+
+            await loadKnowledge(); // Reload the knowledge
+        } catch (error) {
+            console.error('Error deleting knowledge:', error);
+            alert('Error deleting item: ' + error.message);
+        }
+    }
+
+    window.switchTab = function (tabName) {
+        // Update tab buttons
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+            if (tab.textContent.toLowerCase().includes(tabName)) {
+                tab.classList.add('active');
+            }
         });
 
-        async function loadSources() {
-            try {
-                const response = await fetch('/api/rag/sources');
-                const data = await response.json();
-                const sourcesList = document.getElementById('sources-list');
-                
-                if (data.sources && data.sources.length > 0) {
-                    const sourceItems = data.sources.map(source => `
-                        <div class="alert alert-info">
-                            <i class="fas fa-link"></i> ${source.url}
-                        </div>
-                    `).join('');
-                    sourcesList.innerHTML = sourceItems;
-                } else {
-                    sourcesList.innerHTML = '<div class="alert alert-light">No external sources added yet.</div>';
-                }
-            } catch (error) {
-                console.error('Error loading sources:', error);
-                document.getElementById('sources-list').innerHTML = 
-                    '<div class="alert alert-danger">Error loading sources.</div>';
-            }
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        const tabContent = document.getElementById(`${tabName}-tab`);
+        if (tabContent) {
+            tabContent.classList.add('active');
         }
-        
-        async function addSource() {
-            const sourceUrl = document.getElementById('sourceUrl').value.trim();
-            if (!sourceUrl) {
-                alert('Please enter a source URL');
+
+        if (tabName === 'view') {
+            loadKnowledge();
+        }
+
+        // If moving away from add tab, clear any error states
+        if (tabName !== 'add') {
+            document.querySelectorAll('.error-message').forEach(elem => elem.remove());
+        }
+    }
+
+    async function loadKnowledge() {
+        try {
+            const response = await fetch('/api/rag/knowledge');
+            let knowledge = null;
+            if (response.ok) {
+                knowledge = await response.json();
+            } else {
+                // Try to parse error as JSON, fallback to text
+                let errorMsg = '';
+                try {
+                    const err = await response.json();
+                    errorMsg = err.error || JSON.stringify(err);
+                } catch (e) {
+                    errorMsg = await response.text();
+                }
+                document.getElementById('schema-knowledge').innerHTML = `<div class="alert alert-danger">Error loading schema knowledge: ${errorMsg}</div>`;
+                document.getElementById('business-rules').innerHTML = `<div class="alert alert-danger">Error loading business rules: ${errorMsg}</div>`;
                 return;
             }
-            
-            try {
-                const response = await fetch('/api/rag/sources', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ url: sourceUrl })
-                });
-                
-                if (response.ok) {
-                    document.getElementById('sourceUrl').value = '';
-                    await loadSources();  // Reload the sources list
-                } else {
-                    const error = await response.json();
-                    alert(error.message || 'Failed to add source');
-                }
-            } catch (error) {
-                console.error('Error adding source:', error);
-                alert('Error adding source. Please try again.');
+
+            // Update schema knowledge display
+            const schemaList = document.getElementById('schema-knowledge');
+            if (knowledge.schema && knowledge.schema.length > 0) {
+                schemaList.innerHTML = knowledge.schema
+                    .map(item => createKnowledgeItem(item, 'schema'))
+                    .join('');
+            } else {
+                schemaList.innerHTML = '<div class="alert alert-light">No schema knowledge added yet.</div>';
             }
+
+            // Update business rules display
+            const rulesList = document.getElementById('business-rules');
+            if (knowledge.business_rules && knowledge.business_rules.length > 0) {
+                rulesList.innerHTML = knowledge.business_rules
+                    .map(item => createKnowledgeItem(item, 'rule'))
+                    .join('');
+            } else {
+                rulesList.innerHTML = '<div class="alert alert-light">No business rules added yet.</div>';
+            }
+        } catch (error) {
+            console.error('Error loading knowledge:', error);
+            document.getElementById('schema-knowledge').innerHTML =
+                '<div class="alert alert-danger">Error loading schema knowledge.</div>';
+            document.getElementById('business-rules').innerHTML =
+                '<div class="alert alert-danger">Error loading business rules.</div>';
         }
-        
-        function switchTab(tabName) {
-            // Update tab buttons
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-                if (tab.textContent.toLowerCase().includes(tabName)) {
-                    tab.classList.add('active');
-                }
-            });
+    }
 
-            // Update tab content
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(`${tabName}-tab`).classList.add('active');
+    function createKnowledgeItem(item, type) {
+        const metadata = item.metadata || {};
+        const metadataTags = Object.entries(metadata)
+            .map(([key, value]) => `<span class="metadata-tag">${key}: ${value}</span>`)
+            .join('');
 
-            if (tabName === 'view') {
-                loadKnowledge();
-            }
+        // Prepare the edit data by properly escaping quotes and other special characters
+        const editData = btoa(JSON.stringify({ text: item.text, metadata: metadata }));
 
-            // If moving away from add tab, clear any error states
-            if (tabName !== 'add') {
-                document.querySelectorAll('.error-message').forEach(elem => elem.remove());
-            }
+        const editButton = type === 'schema'
+            ? `<button class="btn btn-sm btn-primary me-2" onclick="editSchemaKnowledge('${editData}')"><i class="fas fa-edit"></i></button>`
+            : `<button class="btn btn-sm btn-primary me-2" onclick="editBusinessRule('${editData}')"><i class="fas fa-edit"></i></button>`;
 
-            // If moving away from add tab, clear the error state
-            if (tabName !== 'add') {
-                document.querySelectorAll('.error-message').forEach(elem => elem.remove());
-            }
-        }
-
-        function loadKnowledge() {
-            fetch('/api/rag/knowledge')
-                .then(response => response.json())
-                .then(knowledge => {
-                    // Update schema knowledge display
-                    const schemaList = document.getElementById('schema-knowledge');
-                    schemaList.innerHTML = knowledge.schema
-                        .map(item => createKnowledgeItem(item, 'schema'))
-                        .join('');
-
-                    // Update business rules display
-                    const rulesList = document.getElementById('business-rules');
-                    rulesList.innerHTML = knowledge.business_rules
-                        .map(item => createKnowledgeItem(item, 'rule'))
-                        .join('');
-                });
-        }
-
-        function createKnowledgeItem(item, type) {
-            const metadata = item.metadata || {};
-            const metadataTags = Object.entries(metadata)
-                .map(([key, value]) => `<span class="metadata-tag">${key}: ${value}</span>`)
-                .join('');
-
-            return `
+        return `
                 <div class="knowledge-item">
-                    <div class="knowledge-text">${item.text}</div>
-                    <div class="metadata-tags">${metadataTags}</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="knowledge-content flex-grow-1 me-3">
+                            <div class="knowledge-text">${item.text}</div>
+                            ${metadataTags ? `<div class="metadata-tags mt-2">${metadataTags}</div>` : ''}
+                        </div>
+                        <div class="flex-shrink-0">
+                            ${editButton}
+                            <button class="btn btn-sm btn-danger" onclick="deleteKnowledge('${type}', '${item.text.replace(/'/g, "\\'")}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             `;
+    }
+
+    function addSchemaKnowledge() {
+        const text = document.getElementById('schema-text').value;
+        const table = document.getElementById('schema-table').value;
+        const column = document.getElementById('schema-column').value;
+        if (!text) {
+            alert('Please enter a description');
+            return;
+        }
+        // ...existing code for adding schema knowledge...
+    }
+
+    // Add a new business rule by POSTing to the rag business-rules endpoint
+    async function addBusinessRule() {
+        const textEl = document.getElementById('rule-text');
+        const categoryEl = document.getElementById('rule-category');
+        const priorityEl = document.getElementById('rule-priority');
+        const text = textEl ? textEl.value.trim() : '';
+        const category = categoryEl ? categoryEl.value.trim() : '';
+        const priority = priorityEl ? priorityEl.value : '';
+
+        if (!text) {
+            alert('Please enter a rule description');
+            return;
         }
 
-        function addSchemaKnowledge() {
-            const text = document.getElementById('schema-text').value;
-            const table = document.getElementById('schema-table').value;
-            const column = document.getElementById('schema-column').value;
+        const payload = {
+            descriptions: [
+                { text: text, metadata: { category: category, priority: priority } }
+            ]
+        };
 
-            if (!text) {
-                alert('Please enter a description');
+        try {
+            const resp = await fetch('/api/rag/business-rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                alert('Failed to add business rule: ' + (data.error || JSON.stringify(data)));
                 return;
             }
 
-            const metadata = {};
-            if (table) metadata.table = table;
-            if (column) metadata.column = column;
-
-            fetch('/api/rag/schema', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    descriptions: [{
-                        text: text,
-                        metadata: metadata
-                    }]
-                })
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    document.getElementById('schema-text').value = '';
-                    document.getElementById('schema-table').value = '';
-                    document.getElementById('schema-column').value = '';
-                    alert('Schema knowledge added successfully!');
-                } else {
-                    alert('Error adding schema knowledge');
-                }
-            });
+            // Clear inputs and refresh list
+            if (textEl) textEl.value = '';
+            if (categoryEl) categoryEl.value = '';
+            if (priorityEl) priorityEl.value = 'medium';
+            await loadKnowledge();
+            alert('Business rule added');
+        } catch (e) {
+            console.error('Error adding business rule', e);
+            alert('Error adding business rule: ' + e.message);
         }
+    }
 
-        function addBusinessRule() {
-            const text = document.getElementById('rule-text').value;
-            const category = document.getElementById('rule-category').value;
-            const priority = document.getElementById('rule-priority').value;
-
-            if (!text) {
-                alert('Please enter a rule description');
-                return;
-            }
-
-            const metadata = {};
-            if (category) metadata.category = category;
-            if (priority) metadata.priority = priority;
-
-            fetch('/api/rag/business-rules', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    descriptions: [{
-                        text: text,
-                        metadata: metadata
-                    }]
-                })
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    document.getElementById('rule-text').value = '';
-                    document.getElementById('rule-category').value = '';
-                    document.getElementById('rule-priority').value = 'medium';
-                    alert('Business rule added successfully!');
-                } else {
-                    alert('Error adding business rule');
-                }
-            });
+    async function createScheduleFromNL() {
+        const prompt = document.getElementById('nl-schedule').value.trim();
+        if (!prompt) { alert('Enter a natural language schedule'); return; }
+        const parseR = await fetch('/api/schedules/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+        const parseData = await parseR.json();
+        if (!parseR.ok) { alert('Failed to parse: ' + (parseData.error || JSON.stringify(parseData))); return; }
+        const job_spec = parseData.job_spec;
+        const createR = await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_spec }) });
+        const createData = await createR.json();
+        if (createR.ok) {
+            alert('Schedule created: ' + createData.job_id);
+            listSchedules();
+        } else {
+            alert('Failed to create schedule: ' + (createData.error || JSON.stringify(createData)));
         }
+    }
 
-        // Scheduler client functions
-        async function parseSchedule() {
-            const prompt = document.getElementById('nl-schedule').value.trim();
-            if (!prompt) { alert('Enter a natural language schedule'); return; }
-            const resEl = document.getElementById('schedule-parse-result');
-            resEl.innerText = 'Parsing...';
-            try {
-                const r = await fetch('/api/schedules/parse', {
-                    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({prompt})
-                });
-                const data = await r.json();
-                if (r.ok) {
-                    resEl.innerText = JSON.stringify(data.job_spec, null, 2);
+    async function listSchedules() {
+        const listEl = document.getElementById('schedules-list');
+        listEl.innerText = 'Loading...';
+        try {
+            const r = await fetch('/api/schedules');
+            const data = await r.json();
+            if (r.ok) {
+                if (data.jobs && data.jobs.length) {
+                    listEl.innerHTML = data.jobs.map(j => `<pre>${JSON.stringify(j, null, 2)}<button onclick="deleteSchedule('${j.id}')">Delete</button></pre>`).join('');
                 } else {
-                    resEl.innerText = 'Parse error: ' + (data.error || JSON.stringify(data));
+                    listEl.innerText = 'No schedules';
                 }
-            } catch (e) {
-                resEl.innerText = 'Error parsing schedule: ' + e;
-            }
-        }
-
-        async function createScheduleFromNL() {
-            const prompt = document.getElementById('nl-schedule').value.trim();
-            if (!prompt) { alert('Enter a natural language schedule'); return; }
-            const parseR = await fetch('/api/schedules/parse', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt})});
-            const parseData = await parseR.json();
-            if (!parseR.ok) { alert('Failed to parse: ' + (parseData.error||JSON.stringify(parseData))); return; }
-            const job_spec = parseData.job_spec;
-            const createR = await fetch('/api/schedules', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({job_spec})});
-            const createData = await createR.json();
-            if (createR.ok) {
-                alert('Schedule created: ' + createData.job_id);
-                listSchedules();
             } else {
-                alert('Failed to create schedule: ' + (createData.error||JSON.stringify(createData)));
+                listEl.innerText = 'Error listing schedules';
             }
+        } catch (e) { listEl.innerText = 'Error: ' + e }
+    }
+
+    async function deleteSchedule(id) {
+        if (!confirm('Delete schedule ' + id + '?')) return;
+        const r = await fetch('/api/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (r.ok) { alert('Deleted'); listSchedules(); } else { alert('Delete failed'); }
+    }
+
+    // Schema Knowledge Edit Functions
+    function editSchemaKnowledge(encodedData) {
+        try {
+            const item = JSON.parse(atob(encodedData));
+            const textEl = document.getElementById('edit-schema-text');
+            const tableEl = document.getElementById('edit-schema-table');
+            const columnEl = document.getElementById('edit-schema-column');
+            const origTextEl = document.getElementById('original-schema-text');
+            if (!textEl || !tableEl || !columnEl || !origTextEl) {
+                alert('Edit modal elements not found. Please check template markup.');
+                return;
+            }
+            textEl.value = item.text;
+            tableEl.value = item.metadata.table || '';
+            columnEl.value = item.metadata.column || '';
+            origTextEl.value = item.text; // Store original text for reference
+            const modal = new bootstrap.Modal(document.getElementById('editSchemaModal'));
+            modal.show();
+        } catch (error) {
+            console.error('Error processing item data:', error);
+            alert('Error opening edit form. Please try again.');
+        }
+    }
+
+    async function editBusinessRule(itemData) {
+        try {
+            const item = JSON.parse(atob(itemData));
+            const textEl = document.getElementById('edit-rule-text');
+            const catEl = document.getElementById('edit-rule-category');
+            const prioEl = document.getElementById('edit-rule-priority');
+            const origTextEl = document.getElementById('original-rule-text');
+            if (!textEl || !catEl || !prioEl || !origTextEl) {
+                alert('Edit modal elements not found. Please check template markup.');
+                return;
+            }
+            textEl.value = item.text;
+            catEl.value = (item.metadata && item.metadata.category) ? item.metadata.category : '';
+            prioEl.value = (item.metadata && item.metadata.priority) ? item.metadata.priority : 'medium';
+            origTextEl.value = item.text;
+            const modal = new bootstrap.Modal(document.getElementById('editBusinessRuleModal'));
+            modal.show();
+        } catch (error) {
+            console.error('Error processing business rule data:', error);
+            alert('Error opening edit form. Please try again.');
+        }
+    }
+
+    async function saveBusinessRuleEdit() {
+        const originalText = document.getElementById('original-rule-text').value;
+        const newText = document.getElementById('edit-rule-text').value;
+        const category = document.getElementById('edit-rule-category').value;
+        const priority = document.getElementById('edit-rule-priority').value;
+
+        if (!newText) {
+            alert('Please enter a rule description');
+            return;
         }
 
-        async function listSchedules() {
-            const listEl = document.getElementById('schedules-list');
-            listEl.innerText = 'Loading...';
-            try {
-                const r = await fetch('/api/schedules');
-                const data = await r.json();
-                if (r.ok) {
-                    if (data.jobs && data.jobs.length) {
-                        listEl.innerHTML = data.jobs.map(j=> `<pre>${JSON.stringify(j, null, 2)}<button onclick="deleteSchedule('${j.id}')">Delete</button></pre>`).join('');
-                    } else {
-                        listEl.innerText = 'No schedules';
-                    }
-                } else {
-                    listEl.innerText = 'Error listing schedules';
-                }
-            } catch(e){ listEl.innerText = 'Error: '+e }
+        const metadata = {};
+        if (category) metadata.category = category;
+        if (priority) metadata.priority = priority;
+
+        try {
+            // First delete the old item
+            const deleteResponse = await fetch('/api/rag/business-rules', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ id: originalText })
+            });
+
+            if (!deleteResponse.ok) {
+                throw new Error('Failed to delete old business rule');
+            }
+
+            // Then add the new one
+            const addResponse = await fetch('/api/rag/business-rules', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    descriptions: [{
+                        text: newText,
+                        metadata: metadata
+                    }]
+                })
+            });
+
+            if (!addResponse.ok) {
+                throw new Error('Failed to save updated business rule');
+            }
+
+            const result = await addResponse.json();
+            if (result.success) {
+                const modal = bootstrap.Modal.getInstance(document.getElementById('editBusinessRuleModal'));
+                modal.hide();
+                await loadKnowledge();
+            } else {
+                alert('Error saving business rule');
+            }
+        } catch (error) {
+            console.error('Error saving business rule edit:', error);
+            alert('Error saving changes. Please try again.');
+        }
+    }
+
+    async function saveSchemaEdit() {
+        const originalText = document.getElementById('original-schema-text').value;
+        const newText = document.getElementById('edit-schema-text').value;
+        const table = document.getElementById('edit-schema-table').value;
+        const column = document.getElementById('edit-schema-column').value;
+
+        if (!newText) {
+            alert('Please enter a description');
+            return;
         }
 
-        async function deleteSchedule(id) {
-            if (!confirm('Delete schedule '+id+'?')) return;
-            const r = await fetch('/api/schedules/'+encodeURIComponent(id), {method:'DELETE'});
-            if (r.ok) { alert('Deleted'); listSchedules(); } else { alert('Delete failed'); }
+        const metadata = {};
+        if (table) metadata.table = table;
+        if (column) metadata.column = column;
+
+        try {
+            // First delete the old item
+            const deleteResponse = await fetch('/api/rag/schema', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ id: originalText })
+            });
+
+            if (!deleteResponse.ok) {
+                throw new Error('Failed to delete old item');
+            }
+
+            // Then add the new item
+            const addResponse = await fetch('/api/rag/schema', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    descriptions: [{
+                        text: newText,
+                        metadata: metadata
+                    }]
+                })
+            });
+
+            if (!addResponse.ok) {
+                throw new Error('Failed to save new item');
+            }
+
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editSchemaModal'));
+            alert('Schema knowledge updated successfully!');
+        } catch (error) {
+            console.error('Error updating schema knowledge:', error);
+            alert('Error updating schema knowledge. Please try again.');
         }
-    </script>
+    }
+</script>
+{% include 'edit_business_rule_modal.html' %}
+{% include 'edit_schema_knowledge_modal.html' %}
 {% endblock %}

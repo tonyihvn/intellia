@@ -4,11 +4,22 @@ from ..core.command_handler import CommandHandler
 from ..llm.client import LLMClient
 from ..rag.enhancer import QueryEnhancer
 from ..rag.manager import RAGManager
+from ..rag.schema_context import SchemaContextManager
 from ..config import Config
 from .history_manager import HistoryManager
 import os
 import logging
-import mysql.connector
+# Prefer mysql.connector if available, fall back to pymysql, otherwise leave a None placeholder
+# so the code can report a helpful error when DB connector is not installed.
+try:
+    import mysql.connector as mysql_connector
+except Exception:
+    try:
+        import pymysql as mysql_connector
+    except Exception:
+        mysql_connector = None
+        logging.warning("Neither 'mysql.connector' nor 'pymysql' is installed; DB connector functionality will be unavailable. Install 'mysql-connector-python' or 'PyMySQL'.")
+
 import re
 import json
 import html
@@ -20,6 +31,7 @@ from ..db.schema_fetcher import SchemaFetcher
 import shutil
 from pathlib import Path
 import re
+import base64
 
 main_routes = Blueprint('main', __name__, url_prefix='/api')
 
@@ -65,10 +77,18 @@ def validate_sql_against_rag_schema(sql: str, db_conn):
     """Validate that SQL references only tables/columns present in the current DB schema.
 
     Returns (True, {}) on success or (False, details) where details contains unknown identifiers.
-    This performs conservative checks: verifies any table.column usages and attempts to
-    check unqualified column names in the SELECT clause.
+    Handles table aliases, subqueries, and common SQL patterns while validating table and column references.
     """
     try:
+        # Common SQL keywords and functions that shouldn't trigger validation errors
+        sql_keywords = {
+            'select', 'from', 'where', 'and', 'or', 'join', 'inner', 'outer', 'left', 'right',
+            'group', 'by', 'having', 'order', 'limit', 'offset', 'as', 'on', 'case', 'when',
+            'then', 'else', 'end', 'union', 'all', 'in', 'exists', 'between', 'like', 'is',
+            'null', 'not', 'true', 'false', 'asc', 'desc', 'distinct', 'count', 'sum', 'avg',
+            'min', 'max', 'coalesce', 'if', 'ifnull', 'cast'
+        }
+
         fetcher = SchemaFetcher(db_conn)
         cols = fetcher.get_columns()  # list of dicts with table_name and column_name
         table_columns = {}
@@ -83,40 +103,67 @@ def validate_sql_against_rag_schema(sql: str, db_conn):
             table_columns.setdefault(t, set()).add(col)
             all_columns.add(col)
 
+        # Add common English stopwords and collect table aliases to ignore in table validation
+        stopwords = {'the', 'a', 'an', 'of', 'to', 'for', 'in', 'on', 'by', 'with', 'as', 'at', 'from'}
+        # Find table aliases in FROM/JOIN clauses
+        alias_pattern = r'(?:from|join)\s+([`\"]?\w+[`\"]?)(?:\s+(?:as\s+)?([`\"]?\w+[`\"]?))?'
+        aliases = set()
+        for match in re.finditer(alias_pattern, sql, re.IGNORECASE):
+            table_name = match.group(1)
+            alias = match.group(2)
+            if alias:
+                aliases.add(alias.strip('`"').lower())
+
         unknown = {'table_column': [], 'unqualified_columns': []}
 
         # Check occurrences of table.column (with optional quotes/backticks)
         for m in re.finditer(r"([`\"]?)([A-Za-z0-9_]+)\1\s*\.\s*([`\"]?)([A-Za-z0-9_]+)\3", sql):
             table = m.group(2)
             column = m.group(4)
-            if table not in all_tables or column not in table_columns.get(table, set()):
-                unknown['table_column'].append({'table': table, 'column': column})
+            table_lc = table.lower()
+            if (table_lc not in {t.lower() for t in all_tables}
+                and table_lc not in stopwords
+                and table_lc not in aliases) or \
+               (column != '*' and column.lower() not in {c.lower() for c in table_columns.get(table, set())}):
+                if table_lc not in stopwords and table_lc not in aliases:
+                    unknown['table_column'].append({'table': table, 'column': column})
 
-        # Naive unqualified column check: inspect SELECT clause contents
+        # More lenient unqualified column check for SELECT clause
         sel = re.search(r"select\s+(.*?)\s+from\s", sql, flags=re.I | re.S)
         if sel:
             select_text = sel.group(1)
-            # Remove function calls and literals
-            cleaned = re.sub(r"\b\w+\s*\([^)]*\)", '', select_text)
+            # Remove function calls, subqueries and literals
+            cleaned = re.sub(r"\b\w+\s*\([^)]*\)", '', select_text)  # Remove function calls
+            cleaned = re.sub(r'\([^)]+\)', '', cleaned)  # Remove subqueries
+            cleaned = re.sub(r"'[^']*'", '', cleaned)  # Remove string literals
+            cleaned = re.sub(r'"[^"]*"', '', cleaned)  # Remove double-quoted strings
             # split by commas and extract potential column tokens
             parts = [p.strip() for p in cleaned.split(',') if p.strip()]
+            
             for p in parts:
-                # ignore '*' wildcard
-                if p == '*' or p.endswith('.*'):
+                # ignore wildcards, literals and known SQL keywords
+                # Skip various cases that don't need validation
+                if any([
+                    p == '*' or p.endswith('.*'),  # wildcards
+                    re.match(r"^\d+$", p),  # numbers
+                    '.' in p,  # already handled qualified columns
+                    not p,  # empty strings
+                    p.lower() in sql_keywords,  # SQL keywords
+                    re.match(r"^['\"].*['\"]$", p),  # string literals
+                    re.match(r"^`.*`$", p)  # backtick quoted identifiers
+                ]):
                     continue
-                # remove aliases after AS or space
-                p = re.sub(r"\s+as\s+.*$", '', p, flags=re.I)
-                p = p.split()[-1]
-                # strip quotes/backticks
-                p = p.strip('`"')
-                # Skip if looks like a literal or number
-                if re.match(r"^\d+$", p):
-                    continue
-                # If the token contains a dot it was already handled above
-                if '.' in p:
-                    continue
-                # If token not in any known column names, flag it
-                if p and p not in all_columns:
+
+                # Clean up the token
+                p = re.sub(r"\s+as\s+.*$", '', p, flags=re.I)  # remove aliases
+                p = p.split()[-1]  # get last part after spaces
+                p = p.strip('`"\'')  # strip quotes/backticks
+                
+                # More lenient validation: check if it exists in any table's columns
+                if p and p.lower() not in sql_keywords and not any(
+                    p.lower() in {col.lower() for col in cols} 
+                    for cols in table_columns.values()
+                ):
                     unknown['unqualified_columns'].append(p)
 
         # If no unknowns, success
@@ -132,30 +179,125 @@ def validate_sql_against_rag_schema(sql: str, db_conn):
 def handle_db_config():
     if request.method == 'GET':
         return jsonify(Config.get_db_config())
-    
     if request.method == 'POST':
-        if not request.is_json:
-            return jsonify({"error": "Request must be JSON"}), 415
-            
-        new_config = request.get_json()
-        required_fields = ['host', 'user', 'password', 'database', 'port']
-        
-        if not all(field in new_config for field in required_fields):
-            return jsonify({'error': 'Missing required database configuration fields'}), 400
-            
-        # Test the connection before saving
         try:
-            conn = mysql.connector.connect(**new_config)
-            conn.close()
-        except mysql.connector.Error as e:
-            return jsonify({'error': f'Database connection failed: {str(e)}'}), 400
-            
-        # Save DB config first
-        Config.save_db_config(new_config)
+            new_config = request.get_json(force=True)
+        except Exception as e:
+            return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
 
-        # === Clear previous environment artifacts before bootstrapping new DB ===
+        required_fields = ['host', 'port', 'database', 'user', 'password']
+        missing = [f for f in required_fields if not new_config.get(f)]
+        if missing:
+            return jsonify({'error': f'Missing required database configuration fields: {", ".join(missing)}'}), 400
+
+        # Test the connection before saving
+        if mysql_connector is None:
+            return jsonify({'error': "Database connector not available on server; install 'mysql-connector-python' or 'PyMySQL'"}), 500
         try:
-            # 1) Clear guiders/business guides
+            conn = mysql_connector.connect(**new_config)
+            conn.close()
+        except Exception as e:
+            return jsonify({'error': f'Database connection failed: {str(e)}'}), 400
+
+        # Save DB config first
+        try:
+            Config.save_db_config(new_config)
+        except Exception as e:
+            return jsonify({'error': f'Failed to save DB config: {str(e)}'}), 500
+
+        # === Clear ALL previous environment artifacts before bootstrapping new DB ===
+        try:
+            logging.info("Clearing all vector stores and saved data for database change...")
+            # ...existing code for clearing vector stores, cache, etc...
+            logging.info("Clearing all vector stores and saved data for database change...")
+            
+            # 1) Clear all vector stores and their cached data
+            try:
+                # Clear main vector store directory
+                vs_root = Path(os.path.join(os.getcwd(), 'vector_store'))
+                if vs_root.exists():
+                    shutil.rmtree(str(vs_root))
+                    os.makedirs(str(vs_root))
+                    logging.info("Cleared main vector store directory")
+
+                # Also clear vector stores in src directory if they exist
+                src_vs_root = Path(os.path.join(os.path.dirname(__file__), '..', 'vector_store'))
+                if src_vs_root.exists():
+                    shutil.rmtree(str(src_vs_root))
+                    os.makedirs(str(src_vs_root))
+                    logging.info("Cleared src vector store directory")
+
+            except Exception as e:
+                logging.error(f"Error clearing vector stores: {e}")
+
+            # Clear RAG manager cache
+            try:
+                rag_manager = RAGManager()
+                # Force clear any cached data
+                rag_manager.clear_all_data()
+                # Reset schema context
+                rag_manager.schema_context = SchemaContextManager()
+                logging.info("Cleared RAG manager cache and schema context")
+            except Exception as e:
+                logging.error(f"Error clearing RAG manager cache: {e}")
+
+            # 2) Clear external sources and schema knowledge
+            try:
+                # Clear all external sources
+                sources_file = os.path.join(Config.CONFIG_DIR, 'sources.json')
+                if os.path.exists(sources_file):
+                    with open(sources_file, 'w') as f:
+                        json.dump({'sources': []}, f)
+                
+                # Clear schema knowledge
+                schema_file = os.path.join(Config.CONFIG_DIR, 'schema.json')
+                if os.path.exists(schema_file):
+                    with open(schema_file, 'w') as f:
+                        json.dump({'tables': [], 'relationships': []}, f)
+
+                logging.info("Cleared external sources and schema knowledge")
+            except Exception as e:
+                logging.error(f"Error clearing external sources and schema: {e}")
+
+            # 3) Clear JSON config files
+            try:
+                # Clear guiders
+                if os.path.exists(Config.GUIDERS_FILE):
+                    with open(Config.GUIDERS_FILE, 'w') as f:
+                        json.dump({}, f)
+                        
+                # Clear query history
+                if os.path.exists(Config.HISTORY_FILE):
+                    with open(Config.HISTORY_FILE, 'w') as f:
+                        json.dump([], f)
+                        
+                # Clear context sources
+                ctx_default = {'urls': [], 'documents': []}
+                os.makedirs(os.path.dirname(Config.CONTEXT_FILE), exist_ok=True)
+                with open(Config.CONTEXT_FILE, 'w') as f:
+                    json.dump(ctx_default, f)
+                    
+                # Clear examples
+                examples_file = os.path.join(Config.CONFIG_DIR, 'examples.json')
+                if os.path.exists(examples_file):
+                    with open(examples_file, 'w') as f:
+                        json.dump({'examples': []}, f)
+                        
+                logging.info("Cleared all JSON configuration files")
+            except Exception as e:
+                logging.error(f"Error clearing JSON files: {e}")
+
+            # 3) Remove uploaded files
+            try:
+                upload_dir = os.path.join(current_app.static_folder, 'uploads')
+                if os.path.exists(upload_dir):
+                    shutil.rmtree(upload_dir)
+                    os.makedirs(upload_dir)
+                    logging.info("Cleared uploads directory")
+            except Exception as e:
+                logging.error(f"Error clearing uploads: {e}")
+
+            # 4) Clear business rules
             try:
                 if os.path.exists(Config.GUIDERS_FILE):
                     with open(Config.GUIDERS_FILE, 'w') as f:
@@ -256,6 +398,54 @@ def handle_smtp_config():
 
     ok = Config.save_smtp_config(cfg)
     if ok:
+        # Also persist SMTP settings into a .env file so CLI fallbacks (scripts/send_email.py)
+        # and other processes that read environment variables will pick them up.
+        try:
+            env_path = Path(os.path.join(os.getcwd(), '.env'))
+            env = {}
+            if env_path.exists():
+                try:
+                    with open(env_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith('#') or '=' not in line:
+                                continue
+                            k, v = line.split('=', 1)
+                            env[k.strip()] = v.strip().strip('"').strip("'")
+                except Exception:
+                    env = {}
+
+            # Map our config keys to SMTP_* env vars
+            if 'host' in cfg and cfg.get('host'):
+                env['SMTP_HOST'] = str(cfg.get('host'))
+            if 'port' in cfg and cfg.get('port'):
+                env['SMTP_PORT'] = str(cfg.get('port'))
+            if 'username' in cfg and cfg.get('username'):
+                env['SMTP_USER'] = str(cfg.get('username'))
+            # Persist password to .env only if app setting allows it
+            try:
+                app_settings = Config.get_app_settings()
+                persist_pass = bool(app_settings.get('persist_smtp_password'))
+            except Exception:
+                persist_pass = True
+            if persist_pass and 'password' in cfg and cfg.get('password'):
+                env['SMTP_PASS'] = str(cfg.get('password'))
+            if 'use_tls' in cfg:
+                env['SMTP_TLS'] = '1' if cfg.get('use_tls') else '0'
+            if 'from_address' in cfg and cfg.get('from_address'):
+                env['SMTP_FROM'] = str(cfg.get('from_address'))
+
+            # Write back .env (overwrite existing keys)
+            try:
+                with open(env_path, 'w', encoding='utf-8') as f:
+                    for k, v in env.items():
+                        f.write(f"{k}={v}\n")
+            except Exception as e:
+                logging.warning(f"Failed to write .env with SMTP settings: {e}")
+
+        except Exception as e:
+            logging.warning(f"Error persisting SMTP to .env: {e}")
+
         return jsonify({'message': 'SMTP configuration saved successfully'})
     return jsonify({'error': 'Failed to save SMTP configuration'}), 500
 
@@ -337,8 +527,10 @@ def handle_query():
         llm_client = LLMClient()
         query_handler = get_query_handler()
         command_handler = CommandHandler(llm_client, query_handler)
-        
-        result = command_handler.handle_command(command)
+
+        # Include optional conversation history passed from client to provide context
+        conversation = data.get('conversation') if isinstance(data, dict) else None
+        result = command_handler.handle_command(command, conversation=conversation)
 
         # Determine status for history: previews are stored as 'preview'
         status = 'error' if result.get('error') else ('preview' if result.get('type') in ('query_preview', 'action_preview') else 'success')
@@ -362,11 +554,11 @@ def handle_query():
         # Return result plus history id so clients can confirm against it
         result['_history_id'] = history_entry['id']
         return jsonify(result)
-            
+
     except Exception as e:
         error_message = str(e)
         logging.error(f"Error handling command: {error_message}")
-        
+
         # Log failed command to history
         history_entry = {
             'id': str(uuid.uuid4()),
@@ -459,7 +651,7 @@ def confirm_action():
             res = {'type': 'sql_executed', 'results': query_handler.execute_sql(sql)}
         else:
             # Fallback: produce a preview first, validate generated SQL, then execute
-            preview = command_handler.handle_command(command, execute=False)
+            preview = command_handler.handle_command(command, execute=False, conversation=data.get('conversation'))
             generated_sql = preview.get('sql')
             if generated_sql:
                 valid = query_handler.validate_sql_against_schema(generated_sql)
@@ -471,7 +663,7 @@ def confirm_action():
                     return jsonify({'error': 'Generated SQL validation failed', 'details': valid, 'analysis': analysis}), 400
 
             # Now execute for real
-            res = command_handler.handle_command(command, execute=True)
+            res = command_handler.handle_command(command, execute=True, conversation=data.get('conversation'))
 
         # If SQL executed and returned tabular results, attempt to format using the same LLM
         try:
@@ -617,17 +809,25 @@ def execute_sql():
         return jsonify({'error': str(e)}), 500
 
 
+
+# Unified /db/tables endpoint: always returns list of objects with table_name
 @main_routes.route('/db/tables', methods=['GET'])
-def list_tables():
-    """Return a list of tables in the configured database."""
+def list_db_tables():
+    """Return a list of table names available in the configured database as objects with table_name."""
     try:
         conn = get_db_connection()
         if not conn:
-            return jsonify({'tables': []})
+            return jsonify({'error': 'Could not connect to database'}), 500
         try:
             fetcher = SchemaFetcher(conn)
             tables = fetcher.get_tables() or []
-            return jsonify({'tables': tables})
+            table_objs = []
+            for t in tables:
+                if isinstance(t, dict) and 'table_name' in t:
+                    table_objs.append({'table_name': t['table_name']})
+                else:
+                    table_objs.append({'table_name': str(t)})
+            return jsonify({'tables': table_objs})
         finally:
             try:
                 conn.close()
@@ -737,6 +937,30 @@ def table_rows(table_name):
             finally:
                 cur.close()
 
+            # Encode any binary/blob fields to base64 so JSON serialization won't fail
+            try:
+                for r in rows:
+                    # r is a dict (dictionary=True) - convert byte-like values
+                    for k, v in list(r.items()):
+                        if v is None:
+                            continue
+                        try:
+                            # memoryview support
+                            if isinstance(v, memoryview):
+                                b = v.tobytes()
+                                r[k] = {"__b64__": True, "data": base64.b64encode(b).decode('ascii')}
+                            elif isinstance(v, (bytes, bytearray)):
+                                r[k] = {"__b64__": True, "data": base64.b64encode(bytes(v)).decode('ascii')}
+                        except Exception:
+                            # If conversion fails, stringify as fallback but still mark as base64-like
+                            try:
+                                r[k] = {"__b64__": True, "data": str(v)}
+                            except Exception:
+                                r[k] = None
+            except Exception:
+                # Non-fatal: if encoding fails, proceed with original rows (JSON may still fail if unhandled types present)
+                pass
+
             return jsonify({'rows': rows, 'total': total})
         finally:
             try:
@@ -821,26 +1045,6 @@ def manage_query_history(query_id):
         return ('', 204)
 
 
-@main_routes.route('/db/tables', methods=['GET'])
-def list_db_tables():
-    """Return a list of table names available in the configured database."""
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({'error': 'Could not connect to database'}), 500
-        try:
-            fetcher = SchemaFetcher(conn)
-            tables = fetcher.get_tables()
-            names = [t.get('table_name') for t in tables]
-            return jsonify({'tables': names})
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    except Exception as e:
-        logging.error(f"Error listing tables: {e}")
-        return jsonify({'error': str(e)}), 500
 
 
 @main_routes.route('/db/search', methods=['POST'])
@@ -946,4 +1150,81 @@ def db_search():
 
     except Exception as e:
         logging.error(f"Error performing DB search: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@main_routes.route('/members/report', methods=['GET'])
+def get_members_report():
+    """Generate a report of new members with visualization."""
+    try:
+        # Get new members data
+        members_query = """
+        SELECT m.name AS new_member_name, 
+               i.name AS invited_by_name 
+        FROM users m 
+        LEFT JOIN users i ON i.id = m.invited_by 
+        WHERE m.status = 'New Members'
+        """
+        
+        # Get status distribution for chart
+        status_query = """
+        SELECT status, COUNT(*) as member_count 
+        FROM users 
+        GROUP BY status
+        """
+        
+        query_handler = get_query_handler()
+        
+        # Execute queries with enhanced validation
+        try:
+            members_data = query_handler.execute_sql(members_query)
+            status_data = query_handler.execute_sql(status_query)
+        except Exception as e:
+            logging.error(f"Query execution error: {str(e)}")
+            return jsonify({
+                'error': 'Query execution failed',
+                'details': str(e),
+                'suggested_fix': 'Please check table and column names in your schema'
+            }), 400
+
+        # Prepare response with visualization hints for LLM
+        response = {
+            'data': {
+                'table': {
+                    'headers': ['New Member', 'Invited By'],
+                    'rows': [
+                        [row['new_member_name'], row['invited_by_name']] 
+                        for row in members_data
+                    ]
+                },
+                'chart': {
+                    'type': 'column',
+                    'title': 'Member Status Distribution',
+                    'data': [
+                        {
+                            'category': row['status'],
+                            'value': row['member_count']
+                        } 
+                        for row in status_data
+                    ]
+                }
+            },
+            'visualization': {
+                'requirements': [
+                    'Display a table showing new members and their inviters',
+                    'Create a column chart showing the distribution of member status'
+                ],
+                'table_format': 'standard',
+                'chart_type': 'column',
+                'chart_options': {
+                    'xAxis': 'Member Status',
+                    'yAxis': 'Count',
+                    'colors': ['#4e79a7', '#f28e2c']
+                }
+            }
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logging.error(f"Error generating members report: {str(e)}")
         return jsonify({'error': str(e)}), 500

@@ -74,8 +74,11 @@ def parse(prompt: str):
             if interval_match:
                 val = int(interval_match.group(1))
                 unit = interval_match.group(2)
-                seconds = val * (60 if 'minute' in unit else (3600 if 'hour' in unit else 1))
-                schedule = {'interval': {'seconds': seconds}}
+                # Always provide hours, minutes, seconds fields for APScheduler
+                hours = val if 'hour' in unit else 0
+                minutes = val if 'minute' in unit else 0
+                seconds = val if 'second' in unit else 0
+                schedule = {'interval': {'hours': hours, 'minutes': minutes, 'seconds': seconds}}
             else:
                 schedule = None
 

@@ -1,0 +1,40 @@
+<!-- Business Rule Edit Modal -->
+<div class="modal fade" id="editBusinessRuleModal" tabindex="-1" role="dialog"
+    aria-labelledby="editBusinessRuleModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editBusinessRuleModalLabel">Edit Business Rule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="original-rule-text">
+                <div class="form-group">
+                    <label for="edit-rule-text">Description:</label>
+                    <textarea class="form-control" id="edit-rule-text" rows="4"></textarea>
+                </div>
+                <div class="form-group mt-3">
+                    <label>Metadata:</label>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="edit-rule-category">Category:</label>
+                            <input type="text" class="form-control" id="edit-rule-category">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-rule-priority">Priority:</label>
+                            <select class="form-control" id="edit-rule-priority">
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveBusinessRuleEdit()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>

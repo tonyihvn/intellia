@@ -21,7 +21,8 @@ class Config:
         'datasources': 'datasources.json',
         'visualizations': 'vis_config.json',
         'contexts': 'context_sources.json',
-        'llm': 'llm_config.json'
+        'llm': 'llm_config.json',
+        'examples': 'examples.json'
     }
     
     # Initialize config file paths
@@ -40,14 +41,25 @@ class Config:
     # SMTP/email configuration file
     SMTP_CONFIG_FILE = os.path.join(CONFIG_DIR, 'smtp_config.json')
 
-    # Email settings (can be provided via environment variables)
-    EMAIL_SETTINGS = {
-        'host': os.getenv('SMTP_HOST'),
-        'port': int(os.getenv('SMTP_PORT', '587')),
-        'username': os.getenv('SMTP_USER'),
-        'password': os.getenv('SMTP_PASS'),
-        'use_tls': os.getenv('SMTP_TLS', 'true').lower() in ('1','true','yes'),
-        'from_address': os.getenv('SMTP_FROM')
+    # Email settings (load from smtp_config.json or environment variables)
+    @property
+    def EMAIL_SETTINGS(self):
+        # Try to load from smtp_config.json first
+        if os.path.exists(self.SMTP_CONFIG_FILE):
+            try:
+                with open(self.SMTP_CONFIG_FILE, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"Error loading SMTP config: {e}")
+        
+        # Fall back to environment variables
+        return {
+            'host': os.getenv('SMTP_HOST'),
+            'port': int(os.getenv('SMTP_PORT', '587')),
+            'username': os.getenv('SMTP_USER'),
+            'password': os.getenv('SMTP_PASS'),
+            'use_tls': os.getenv('SMTP_TLS', 'true').lower() in ('1','true','yes'),
+            'from_address': os.getenv('SMTP_FROM')
     }
 
     @classmethod
@@ -79,6 +91,40 @@ class Config:
         except Exception as e:
             logging.error(f"Error saving SMTP config: {e}")
             return False
+
+    @classmethod
+    def get_db_config(cls):
+        """Return DB config from db_config.json or environment variables."""
+        config = {}
+        
+        # Try to load from config file first
+        try:
+            if os.path.exists(cls.DB_CONFIG_FILE):
+                with open(cls.DB_CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+        except Exception as e:
+            logging.error(f"Error loading DB config: {e}")
+        
+        # Override with environment variables if present
+        env_mapping = {
+            'DB_HOST': 'host',
+            'DB_USER': 'user',
+            'DB_PASSWORD': 'password',
+            'DB_NAME': 'database',
+            'DB_PORT': 'port'
+        }
+        
+        for env_var, config_key in env_mapping.items():
+            value = os.getenv(env_var)
+            if value is not None:
+                if config_key == 'port':
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        continue
+                config[config_key] = value
+        
+        return config
 
 
 
@@ -283,9 +329,10 @@ class Config:
         },
         'anthropic': {
             'priority': 4,
+            'enabled': True,
             'api_key': os.getenv('ANTHROPIC_API_KEY', ''),
             'api_url': 'https://api.anthropic.com/v1/messages',
-            'model': 'claude-3-opus-20240229'
+            'model': 'claude-sonnet-3.5'
         },
         'openrouter': {
             'priority': 5,
@@ -371,6 +418,35 @@ class Config:
             'preferred_charts': ['bar', 'line'],
             'color_scheme': 'default'
         }
+
+    @classmethod
+    def get_app_settings(cls):
+        """Load application-level settings stored in config/app.json"""
+        try:
+            path = os.path.join(cls.CONFIG_DIR, 'app.json')
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    return json.load(f) or {}
+        except Exception:
+            pass
+        # defaults
+        return {
+            'auto_send_emails': False,
+            'persist_smtp_password': False,
+            'organization_name': ''
+        }
+
+    @classmethod
+    def save_app_settings(cls, obj: dict):
+        try:
+            path = os.path.join(cls.CONFIG_DIR, 'app.json')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                json.dump(obj or {}, f, indent=2)
+            return True
+        except Exception as e:
+            logging.error(f"Error saving app settings: {e}")
+            return False
 
     @classmethod
     def save_visualization_config(cls, config):

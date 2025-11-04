@@ -11,7 +11,7 @@
             "priority": 3,
             "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
             "model": "gemini-2.0-flash",
-            "enabled": false,
+            "enabled": true,
             "timeout": 30
         },
         "vertex": {
@@ -22,9 +22,9 @@
         },
         "anthropic": {
             "priority": 2,
+            "enabled": false,
             "api_url": "https://api.anthropic.com/v1/messages",
             "model": "claude-3-opus-20240229",
-            "enabled": false,
             "timeout": 30
         },
         "openrouter": {
@@ -59,7 +59,7 @@
                 "deepseek-coder"
             ],
             "api_url": "http://localhost:11434",
-            "enabled": false,
+            "enabled": true,
             "model": "codellama"
         }
     }

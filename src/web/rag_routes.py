@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from ..rag.manager import RAGManager
@@ -8,7 +9,7 @@ from ..config import Config
 rag_routes = Blueprint('rag', __name__)
 rag_manager = RAGManager()
 
-@rag_routes.route('/api/rag/schema', methods=['GET', 'POST'])
+@rag_routes.route('/api/rag/schema', methods=['GET', 'POST', 'DELETE'])
 def handle_schema_knowledge():
     """Endpoint to manage schema-related knowledge."""
     if request.method == 'GET':
@@ -27,8 +28,23 @@ def handle_schema_knowledge():
             
         success = rag_manager.add_schema_knowledge(descriptions)
         return jsonify({'success': success})
+        
+    elif request.method == 'DELETE':
+        if not request.is_json:
+            return jsonify({"error": "Request must be JSON"}), 415
+            
+        data = request.get_json()
+        item_text = data.get('id')  # The text content serves as the ID
+        
+        if not item_text:
+            return jsonify({'error': 'No item ID provided'}), 400
+            
+        success = rag_manager.delete_by_text('schema', item_text)
+        if success:
+            return jsonify({'success': True})
+        return jsonify({'error': 'Failed to delete item'}), 500
 
-@rag_routes.route('/api/rag/business-rules', methods=['GET', 'POST'])
+@rag_routes.route('/api/rag/business-rules', methods=['GET', 'POST', 'DELETE'])
 def handle_business_rules():
     """Endpoint to manage business rule knowledge."""
     if request.method == 'GET':
@@ -47,8 +63,23 @@ def handle_business_rules():
             
         success = rag_manager.add_business_rule(descriptions)
         return jsonify({'success': success})
+        
+    elif request.method == 'DELETE':
+        if not request.is_json:
+            return jsonify({"error": "Request must be JSON"}), 415
+            
+        data = request.get_json()
+        item_text = data.get('id')  # The text content serves as the ID
+        
+        if not item_text:
+            return jsonify({'error': 'No item ID provided'}), 400
+            
+        success = rag_manager.delete_by_text('business_rules', item_text)
+        if success:
+            return jsonify({'success': True})
+        return jsonify({'error': 'Failed to delete item'}), 500
 
-@rag_routes.route('/api/rag/sources', methods=['GET', 'POST'])
+@rag_routes.route('/api/rag/sources', methods=['GET', 'POST', 'DELETE'])
 def manage_sources():
     """Endpoint to manage external context sources."""
     sources_path = os.path.join(current_app.config.get('CONFIG_DIR', Config.CONFIG_DIR), 'sources.json')
@@ -112,6 +143,55 @@ def manage_sources():
                 json.dump(existing_data, f, indent=4)
 
         return jsonify({'success': True, 'source': new_entry})
+
+    elif request.method == 'DELETE':
+        if not request.is_json:
+            return jsonify({"error": "Request must be JSON"}), 415
+            
+        data = request.get_json()
+        source_to_remove = data.get('source')
+        
+        if not source_to_remove:
+            return jsonify({'error': 'No source identifier provided'}), 400
+
+        try:
+            with open(sources_path, 'r') as f:
+                existing_data = json.load(f)
+        except FileNotFoundError:
+            return jsonify({'error': 'Sources file not found'}), 404
+
+        sources = existing_data.get('sources', [])
+        source_found = None
+        
+        # Find the source to remove
+        for source in sources:
+            if source_to_remove in (source.get('url'), source.get('filename')):
+                source_found = source
+                break
+                
+        if not source_found:
+            return jsonify({'error': 'Source not found'}), 404
+
+        # Remove source from list
+        sources.remove(source_found)
+
+        # Delete the file if it exists
+        if 'path' in source_found:
+            try:
+                file_path = source_found['path']
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except OSError as e:
+                # Log error but continue since we still want to remove from sources list
+                logging.warning(f"Error removing source file: {e}")
+
+        # Save updated sources list
+        try:
+            with open(sources_path, 'w') as f:
+                json.dump({'sources': sources}, f, indent=4)
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'error': f'Failed to update sources file: {str(e)}'}), 500
 
 @rag_routes.route('/api/rag/knowledge', methods=['GET'])
 def get_all_knowledge():

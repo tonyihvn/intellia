@@ -13,7 +13,8 @@ def send_email(subject: str, body: str, to: list, cc: list = None):
     Config must provide SMTP settings under Config.EMAIL_SETTINGS as dict with keys:
     - host, port, username, password, use_tls (bool)
     """
-    smtp_cfg = Config.EMAIL_SETTINGS
+    config = Config()
+    smtp_cfg = config.EMAIL_SETTINGS
     if not smtp_cfg:
         raise Exception("SMTP configuration not set")
 

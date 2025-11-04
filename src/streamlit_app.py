@@ -16,13 +16,24 @@ with col2:
             st.warning("Please enter a command or question first.")
         else:
             try:
-                resp = requests.post("http://localhost:5000/api/query", json={"question": query})
+                # maintain a simple conversation history in session state so the server
+                # can use prior turns as context when classifying/generating
+                if 'chat_history' not in st.session_state:
+                    st.session_state['chat_history'] = []
+                # append the user's turn
+                st.session_state['chat_history'].append({"role": "user", "text": query})
+                payload = {"question": query, "conversation": st.session_state['chat_history'][-50:]}
+                resp = requests.post("http://localhost:5000/api/query", json=payload)
                 resp.raise_for_status()
                 preview = resp.json()
                 st.session_state['latest_preview'] = preview
                 # populate editable SQL area if present
                 if preview.get('sql'):
                     st.session_state['editable_sql'] = preview.get('sql')
+                # append assistant reply into conversation history (best-effort)
+                assistant_text = preview.get('response') or preview.get('explanation') or preview.get('sql') or ''
+                if assistant_text:
+                    st.session_state['chat_history'].append({"role": "assistant", "text": assistant_text})
             except Exception as e:
                 st.error(f"Failed to generate preview: {e}")
 
@@ -43,11 +54,18 @@ with col2:
             if preview.get('_history_id'):
                 payload['history_id'] = preview.get('_history_id')
             try:
+                # include recent conversation for context during confirm/execution
+                if 'chat_history' in st.session_state:
+                    payload['conversation'] = st.session_state['chat_history'][-50:]
                 resp = requests.post("http://localhost:5000/api/confirm", json=payload)
                 resp.raise_for_status()
                 result = resp.json()
                 st.success("Execution result")
                 st.json(result)
+                # append execution result to conversation (best-effort)
+                exec_text = result.get('message') or result.get('error') or str(result)
+                if exec_text and 'chat_history' in st.session_state:
+                    st.session_state['chat_history'].append({"role": "assistant", "text": exec_text})
                 # refresh history in sidebar
                 st.session_state.pop('latest_preview', None)
             except Exception as e:

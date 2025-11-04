@@ -1,868 +1,844 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends 'base.html' %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenMRS Query Assistant - Settings</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <style>
-        .viz-option {
-            display: inline-block;
-            padding: 8px 16px;
-            margin: 4px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            cursor: pointer;
-        }
+{% block title %}LLM Settings{% endblock %}
 
-        .viz-option.active {
-            background-color: #007bff;
-            color: white;
-            border-color: #0056b3;
-        }
+{% block extra_css %}
+<style>
+    .viz-option {
+        display: inline-block;
+        padding: 8px 16px;
+        margin: 4px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+    }
 
-        .guider-item,
-        .source-item {
-            padding: 10px;
-            margin: 5px 0;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+    .viz-option.active {
+        background-color: #007bff;
+        color: white;
+        border-color: #0056b3;
+    }
 
-        .btn-remove {
-            padding: 0 8px;
-            color: #dc3545;
-            background: none;
-            border: none;
-        }
+    .guider-item,
+    .source-item {
+        padding: 10px;
+        margin: 5px 0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
 
-        .btn-remove:hover {
-            color: #bd2130;
-        }
-    </style>
-</head>
+    .btn-remove {
+        padding: 0 8px;
+        color: #dc3545;
+        background: none;
+        border: none;
+    }
 
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand" href="/">OpenMRS Query Assistant</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/settings/db">Database Config</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/settings">LLM Settings</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/rag">RAG Management</a>
-                    </li>
-                </ul>
-            </div>
+    .btn-remove:hover {
+        color: #bd2130;
+    }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="container mt-4">
+    <h2>LLM Settings</h2>
+
+    <!-- Cloud Providers Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Cloud LLM Providers</h3>
         </div>
-    </nav>
-
-    <div class="container mt-4">
-        <h2>LLM Settings</h2>
-
-        <!-- Cloud Providers Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">Cloud LLM Providers</h3>
+        <div class="card-body">
+            <!-- Providers Management -->
+            <div class="mb-4">
+                <h4 class="h6">Providers Management</h4>
+                <div id="providersList" class="mb-3"></div>
+                <button class="btn btn-primary" id="saveProvidersBtn">Save Provider Settings</button>
             </div>
-            <div class="card-body">
-                <!-- Providers Management -->
-                <div class="mb-4">
-                    <h4 class="h6">Providers Management</h4>
-                    <div id="providersList" class="mb-3"></div>
-                    <button class="btn btn-primary" id="saveProvidersBtn">Save Provider Settings</button>
-                </div>
-                <!-- Generic providers panel renders here -->
-            </div>
+            <!-- Generic providers panel renders here -->
         </div>
+    </div>
 
-        <!-- Local Models Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">Local Models (Ollama)</h3>
-            </div>
-            <div class="card-body">
-                <div id="ollamaStatus" class="alert alert-info">
-                    Checking Ollama status...
-                </div>
-
-                <form id="ollamaForm">
-                    <div class="mb-3">
-                        <label class="form-label">Available Models</label>
-                        <div class="model-list">
-                            <!-- Models will be populated by JavaScript -->
-                        </div>
-                    </div>
-                    <button type="button" id="pullModels" class="btn btn-primary">Pull Missing Models</button>
-                    <button type="button" id="checkOllama" class="btn btn-secondary">Check Ollama Status</button>
-                </form>
-            </div>
+    <!-- Local Models Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Local Models (Ollama)</h3>
         </div>
+        <div class="card-body">
+            <div id="ollamaStatus" class="alert alert-info">
+                Checking Ollama status...
+            </div>
 
-        <!-- Training Data Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">Training Data</h3>
-            </div>
-            <div class="card-body">
-                <form id="trainingForm" onsubmit="addGuider(event)">
-                    <div class="mb-3">
-                        <label for="new-guider" class="form-label">Add New Training Data:</label>
-                        <textarea id="new-guider" class="form-control" rows="3"
-                            placeholder="Enter information to help the AI understand the data structure or business rules..."></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Add Training Data</button>
-                </form>
-                <div id="guiders-list" class="mt-3">
-                    <!-- Existing guiders will be listed here -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Example Commands Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">Example Commands</h3>
-            </div>
-            <div class="card-body">
-                <form id="examplesForm" onsubmit="addExample(event)">
-                    <div class="mb-3">
-                        <label for="new-example" class="form-label">Add Example Command</label>
-                        <input id="new-example" class="form-control"
-                            placeholder="e.g. Show me total appointments by department as a chart">
-                    </div>
-                    <button class="btn btn-primary" type="submit">Add Example</button>
-                </form>
-                <div id="examples-list" class="mt-3">
-                    <!-- Examples will be listed here -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Context Sources Section -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">External Context Sources</h3>
-            </div>
-            <div class="card-body">
-                <form id="sourcesForm" onsubmit="addSource(event)">
-                    <div class="mb-3">
-                        <label for="new-source-url" class="form-label">Add URL Source:</label>
-                        <input type="url" id="new-source-url" class="form-control"
-                            placeholder="Enter URL to documentation or reference...">
-                    </div>
-                    <div class="mb-3">
-                        <label for="source-file" class="form-label">Upload Document:</label>
-                        <input type="file" id="source-file" class="form-control">
-                    </div>
-                    <button type="submit" class="btn btn-primary">Add Source</button>
-                </form>
-                <div id="sources-list" class="mt-3">
-                    <!-- Sources will be listed here -->
-                </div>
-            </div>
-        </div>
-
-        <!-- SMTP / Email Settings -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">SMTP / Email Settings</h3>
-            </div>
-            <div class="card-body">
-                <form id="smtpForm">
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">SMTP Host</label>
-                            <input type="text" id="smtp-host" class="form-control" placeholder="smtp.example.com">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label">Port</label>
-                            <input type="number" id="smtp-port" class="form-control" value="587">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">From Address</label>
-                            <input type="email" id="smtp-from" class="form-control" placeholder="no-reply@example.com">
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Username</label>
-                            <input type="text" id="smtp-username" class="form-control">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Password</label>
-                            <input type="password" id="smtp-password" class="form-control" placeholder="(saved)">
-                        </div>
-                    </div>
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" value="" id="smtp-tls" checked>
-                        <label class="form-check-label" for="smtp-tls">
-                            Use TLS
-                        </label>
-                    </div>
-                    <button type="button" id="saveSmtpBtn" class="btn btn-primary">Save SMTP Settings</button>
-                </form>
-            </div>
-        </div>
-
-        <!-- Visualization Preferences -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h3 class="h5 mb-0">Visualization Preferences</h3>
-            </div>
-            <div class="card-body">
+            <form id="ollamaForm">
                 <div class="mb-3">
-                    <label class="form-label">Preferred Chart Types:</label>
-                    <div class="visualization-options" id="chart-options">
-                        <!-- Chart options will be added here -->
+                    <label class="form-label">Available Models</label>
+                    <div class="model-list">
+                        <!-- Models will be populated by JavaScript -->
                     </div>
                 </div>
+                <button type="button" id="pullModels" class="btn btn-primary">Pull Missing Models</button>
+                <button type="button" id="checkOllama" class="btn btn-secondary">Check Ollama Status</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Training Data Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Training Data</h3>
+        </div>
+        <div class="card-body">
+            <form id="trainingForm" onsubmit="addGuider(event)">
                 <div class="mb-3">
-                    <label for="default-format" class="form-label">Default Output Format:</label>
-                    <select id="default-format" class="form-control">
-                        <option value="html">Interactive HTML</option>
-                        <option value="pdf">PDF Document</option>
-                        <option value="xlsx">Excel Spreadsheet</option>
-                        <option value="png">PNG Image</option>
-                    </select>
+                    <label for="new-guider" class="form-label">Add New Training Data:</label>
+                    <textarea id="new-guider" class="form-control" rows="3"
+                        placeholder="Enter information to help the AI understand the data structure or business rules..."></textarea>
                 </div>
-                <button onclick="saveSettings()" class="btn btn-primary">Save All Settings</button>
+                <button type="submit" class="btn btn-primary">Add Training Data</button>
+            </form>
+            <div id="guiders-list" class="mt-3">
+                <!-- Existing guiders will be listed here -->
             </div>
         </div>
     </div>
 
+    <!-- Example Commands Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Example Commands</h3>
+        </div>
+        <div class="card-body">
+            <form id="examplesForm" onsubmit="addExample(event)">
+                <div class="mb-3">
+                    <label for="new-example" class="form-label">Add Example Command</label>
+                    <input id="new-example" class="form-control"
+                        placeholder="e.g. Show me total appointments by department as a chart">
+                </div>
+                <button class="btn btn-primary" type="submit">Add Example</button>
+            </form>
+            <div id="examples-list" class="mt-3">
+                <!-- Examples will be listed here -->
+            </div>
+        </div>
+    </div>
 
+    <!-- Context Sources Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">External Context Sources</h3>
+        </div>
+        <div class="card-body">
+            <form id="sourcesForm" onsubmit="addSource(event)">
+                <div class="mb-3">
+                    <label for="new-source-url" class="form-label">Add URL Source:</label>
+                    <input type="url" id="new-source-url" class="form-control"
+                        placeholder="Enter URL to documentation or reference...">
+                </div>
+                <div class="mb-3">
+                    <label for="source-file" class="form-label">Upload Document:</label>
+                    <input type="file" id="source-file" class="form-control">
+                </div>
+                <button type="submit" class="btn btn-primary">Add Source</button>
+            </form>
+            <div id="sources-list" class="mt-3">
+                <!-- Sources will be listed here -->
+            </div>
+        </div>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Load current settings when page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            loadSettings();
-            checkOllamaStatus();
-            loadProviders();
-            loadSmtpSettings();
-        });
-
-        // ===== LLM Provider Settings =====
-        async function loadProviders() {
-            const list = document.getElementById('providersList');
-            list.innerHTML = 'Loading providers...';
-            try {
-                const res = await fetch('/api/llm/providers');
-                const providers = await res.json();
-                const providerNames = Object.keys(providers).sort((a, b) => (providers[a].priority || 99) - (providers[b].priority || 99));
-                list.innerHTML = providerNames.map(name => {
-                    const p = providers[name];
-                    return `
-                    <div class="border rounded p-3 mb-2">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <strong>${name}</strong>
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="prov-${name}-enabled" ${p.enabled ? 'checked' : ''}>
-                                <label class="form-check-label" for="prov-${name}-enabled">Enabled</label>
-                            </div>
-                        </div>
-                        <div class="row mt-2">
-                            <div class="col-md-2">
-                                <label class="form-label">Priority</label>
-                                <input type="number" class="form-control" id="prov-${name}-priority" value="${p.priority ?? 99}">
-                            </div>
-                            <div class="col-md-5">
-                                <label class="form-label">Model</label>
-                                <input type="text" class="form-control" id="prov-${name}-model" value="${p.model || ''}">
-                            </div>
-                            <div class="col-md-5">
-                                <label class="form-label">API Key</label>
-                                <input type="password" class="form-control" id="prov-${name}-apikey" placeholder="${p.api_key ? '(saved)' : 'enter key'}">
-                            </div>
-                        </div>
-                    </div>`;
-                }).join('');
-            } catch (e) {
-                list.innerHTML = '<div class="alert alert-danger">Failed to load providers.</div>'
-            }
-        }
-
-        // ===== Example commands management =====
-        async function loadExamplesSettings() {
-            const list = document.getElementById('examples-list');
-            list.innerHTML = 'Loading...';
-            try {
-                const resp = await fetch('/api/settings/examples');
-                const data = await resp.json();
-                const examples = data.examples || [];
-                list.innerHTML = '';
-                if (!examples.length) {
-                    list.innerHTML = '<div class="text-muted">No example commands configured.</div>';
-                    return;
-                }
-                examples.forEach(ex => {
-                    const div = document.createElement('div');
-                    div.className = 'example-item guider-item';
-                    div.innerHTML = `<div style="flex:1">${escapeHtml(ex)}</div>`;
-                    const del = document.createElement('button');
-                    del.className = 'btn btn-sm btn-outline-danger';
-                    del.textContent = 'Delete';
-                    del.addEventListener('click', async () => {
-                        try {
-                            const r = await fetch('/api/settings/examples', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ example: ex }) });
-                            if (r.ok) loadExamplesSettings(); else alert('Failed to delete example');
-                        } catch (e) { console.error(e); alert('Failed to delete example'); }
-                    });
-                    div.appendChild(del);
-                    list.appendChild(div);
-                });
-            } catch (e) {
-                console.error('Failed to load examples', e);
-                list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
-            }
-        }
-
-        async function addExample(ev) {
-            ev.preventDefault();
-            const input = document.getElementById('new-example');
-            const val = input.value && input.value.trim();
-            if (!val) return alert('Please enter an example command');
-            try {
-                const r = await fetch('/api/settings/examples', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ example: val }) });
-                if (r.ok) {
-                    input.value = '';
-                    loadExamplesSettings();
-                } else {
-                    const j = await r.json();
-                    alert('Failed to add example: ' + (j.error || r.statusText));
-                }
-            } catch (e) { console.error(e); alert('Failed to add example'); }
-        }
-
-        // Ensure examples are loaded alongside other settings
-        document.addEventListener('DOMContentLoaded', () => {
-            loadExamplesSettings();
-        });
-
-        async function saveProviders() {
-            try {
-                const res = await fetch('/api/llm/providers');
-                const providers = await res.json();
-                const payload = { providers: {} };
-                for (const name of Object.keys(providers)) {
-                    payload.providers[name] = {
-                        enabled: document.getElementById(`prov-${name}-enabled`).checked,
-                        priority: parseInt(document.getElementById(`prov-${name}-priority`).value || '99', 10),
-                        api_key: document.getElementById(`prov-${name}-apikey`).value || undefined,
-                        model: document.getElementById(`prov-${name}-model`).value || providers[name].model || ''
-                    };
-                }
-                const resp = await fetch('/api/llm/providers', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await resp.json();
-                if (!resp.ok || !data.success) throw new Error(data.error || 'Failed to save');
-                alert('Provider settings saved');
-            } catch (e) {
-                alert('Error saving providers: ' + e.message);
-            }
-        }
-
-        document.getElementById('saveProvidersBtn').addEventListener('click', saveProviders);
-
-        async function saveProviderSettings(event, provider) {
-            event.preventDefault();
-
-            const form = event.target;
-            const formData = new FormData(form);
-            const config = {};
-
-            for (let [key, value] of formData.entries()) {
-                config[key] = value;
-            }
-
-            try {
-                const response = await fetch('/api/llm/config', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        provider: provider,
-                        config: config
-                    })
-                });
-
-                if (!response.ok) {
-                    const contentType = response.headers.get("content-type");
-                    if (contentType && contentType.indexOf("application/json") !== -1) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.error || `HTTP error ${response.status}`);
-                    } else {
-                        const text = await response.text();
-                        console.error('Server returned:', text);
-                        throw new Error(`HTTP error ${response.status}`);
-                    }
-                }
-
-                const data = await response.json();
-                if (data.success) {
-                    alert('Settings saved successfully');
-                } else {
-                    throw new Error(data.error || 'Failed to save settings');
-                }
-            } catch (error) {
-                console.error('Error saving settings:', error);
-                alert('Error saving settings: ' + error.message);
-            }
-        }
-
-        async function testProvider(provider) {
-            try {
-                const response = await fetch('/api/llm/test', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ provider: provider })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    alert(data.message || 'Connection test successful');
-                } else {
-                    throw new Error(data.error || 'Connection test failed');
-                }
-            } catch (error) {
-                console.error('Error testing connection:', error);
-                alert('Error testing connection: ' + error.message);
-            }
-        }
-
-        // ===== Ollama Local Model Management =====
-        async function checkOllamaStatus() {
-            const statusDiv = document.getElementById('ollamaStatus');
-            try {
-                const response = await fetch('/api/llm/ollama/status');
-                const data = await response.json();
-
-                if (data.running) {
-                    statusDiv.className = 'alert alert-success';
-                    statusDiv.textContent = 'Ollama is running';
-                    loadOllamaModels();
-                } else {
-                    statusDiv.className = 'alert alert-warning';
-                    statusDiv.textContent = 'Ollama is not running';
-                }
-            } catch (error) {
-                statusDiv.className = 'alert alert-danger';
-                statusDiv.textContent = 'Error checking Ollama status';
-            }
-        }
-
-        async function loadOllamaModels() {
-            const modelList = document.querySelector('.model-list');
-            try {
-                const response = await fetch('/api/llm/ollama/models');
-                const data = await response.json();
-
-                modelList.innerHTML = data.models.map(model => `
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="model-${model.name}" 
-                               ${model.installed ? 'checked' : ''}>
-                        <label class="form-check-label" for="model-${model.name}">
-                            ${model.name} ${model.installed ? '(Installed)' : ''}
-                        </label>
+    <!-- SMTP / Email Settings -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">SMTP / Email Settings</h3>
+        </div>
+        <div class="card-body">
+            <form id="smtpForm">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">SMTP Host</label>
+                        <input type="text" id="smtp-host" class="form-control" placeholder="smtp.example.com">
                     </div>
-                `).join('');
-            } catch (error) {
-                modelList.innerHTML = '<div class="alert alert-danger">Error loading models</div>';
-            }
+                    <div class="col-md-2">
+                        <label class="form-label">Port</label>
+                        <input type="number" id="smtp-port" class="form-control" value="587">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">From Address</label>
+                        <input type="email" id="smtp-from" class="form-control" placeholder="no-reply@example.com">
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Username</label>
+                        <input type="text" id="smtp-username" class="form-control">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Password</label>
+                        <input type="password" id="smtp-password" class="form-control" placeholder="(saved)">
+                    </div>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" value="" id="smtp-tls" checked>
+                    <label class="form-check-label" for="smtp-tls">
+                        Use TLS
+                    </label>
+                </div>
+                <button type="button" id="saveSmtpBtn" class="btn btn-primary">Save SMTP Settings</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Visualization Preferences -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Visualization Preferences</h3>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label">Preferred Chart Types:</label>
+                <div class="visualization-options" id="chart-options">
+                    <!-- Chart options will be added here -->
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="default-format" class="form-label">Default Output Format:</label>
+                <select id="default-format" class="form-control">
+                    <option value="html">Interactive HTML</option>
+                    <option value="pdf">PDF Document</option>
+                    <option value="xlsx">Excel Spreadsheet</option>
+                    <option value="png">PNG Image</option>
+                </select>
+            </div>
+            <button onclick="saveSettings()" class="btn btn-primary">Save All Settings</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Load current settings when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSettings();
+        checkOllamaStatus();
+        loadProviders();
+        loadSmtpSettings();
+    });
+
+    // ===== LLM Provider Settings =====
+    async function loadProviders() {
+        const list = document.getElementById('providersList');
+        list.innerHTML = 'Loading providers...';
+        try {
+            const res = await fetch('/api/llm/providers');
+            const providers = await res.json();
+            const providerNames = Object.keys(providers).sort((a, b) => (providers[a].priority || 99) - (providers[b].priority || 99));
+            list.innerHTML = providerNames.map(name => {
+                const p = providers[name];
+                return `
+                        <div class="border rounded p-3 mb-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <strong>${name}</strong>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="prov-${name}-enabled" ${p.enabled ? 'checked' : ''}>
+                                    <label class="form-check-label" for="prov-${name}-enabled">Enabled</label>
+                                </div>
+                            </div>
+                            <div class="row mt-2">
+                                <div class="col-md-2">
+                                    <label class="form-label">Priority</label>
+                                    <input type="number" class="form-control" id="prov-${name}-priority" value="${p.priority ?? 99}">
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label">Model</label>
+                                    <input type="text" class="form-control" id="prov-${name}-model" value="${p.model || ''}">
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label">API Key</label>
+                                    <input type="password" class="form-control" id="prov-${name}-apikey" placeholder="${p.api_key ? '(saved)' : 'enter key'}">
+                                </div>
+                            </div>
+                        </div>`;
+            }).join('');
+        } catch (e) {
+            list.innerHTML = '<div class="alert alert-danger">Failed to load providers.</div>'
         }
+    }
 
-        document.getElementById('pullModels').addEventListener('click', async () => {
-            try {
-                const response = await fetch('/api/llm/ollama/pull', {
-                    method: 'POST'
-                });
-                const data = await response.json();
-                if (data.success) {
-                    alert('Models pulled successfully');
-                    loadOllamaModels();
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (error) {
-                alert('Error pulling models: ' + error.message);
-            }
-        });
-
-        document.getElementById('checkOllama').addEventListener('click', checkOllamaStatus);
-
-        // ===== Training Data Management =====
-        function addGuider(event) {
-            event.preventDefault();
-            const guiderText = document.getElementById('new-guider').value.trim();
-            if (!guiderText) return;
-
-            fetch('/api/settings/guiders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ guider: guiderText })
-            })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        addGuiderToList(guiderText);
-                        document.getElementById('new-guider').value = '';
-                    } else {
-                        throw new Error(result.error || 'Failed to add training data');
-                    }
-                })
-                .catch(error => {
-                    alert('Error adding training data: ' + error.message);
-                });
-        }
-
-        function addGuiderToList(guider) {
-            const guidersList = document.getElementById('guiders-list');
-            const div = document.createElement('div');
-            div.className = 'guider-item';
-            div.innerHTML = `
-                <span>${guider}</span>
-                <button onclick="removeGuider(this)" class="btn btn-remove">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
-            guidersList.appendChild(div);
-        }
-
-        function removeGuider(button) {
-            const item = button.parentElement;
-            const guiderText = item.querySelector('span').textContent;
-
-            fetch('/api/settings/guiders', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ guider: guiderText })
-            })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        item.remove();
-                    } else {
-                        throw new Error(result.error || 'Failed to remove training data');
-                    }
-                })
-                .catch(error => {
-                    alert('Error removing training data: ' + error.message);
-                });
-        }
-
-        // ===== Context Sources Management =====
-        function addSource(event) {
-            event.preventDefault();
-            const sourceUrl = document.getElementById('new-source-url').value.trim();
-            const sourceFile = document.getElementById('source-file').files[0];
-
-            if (!sourceUrl && !sourceFile) {
-                alert('Please provide either a URL or a file');
+    // ===== Example commands management =====
+    async function loadExamplesSettings() {
+        const list = document.getElementById('examples-list');
+        list.innerHTML = 'Loading...';
+        try {
+            const resp = await fetch('/api/settings/examples');
+            if (!resp.ok) {
+                const text = await resp.text().catch(() => resp.statusText || 'Failed to fetch');
+                list.innerHTML = `<div class="text-danger">Failed to load examples: ${escapeHtml(text)}</div><div class="mt-2"><button id="retryExamplesSettings" class="btn btn-sm btn-outline-secondary">Retry</button></div>`;
+                const retry = document.getElementById('retryExamplesSettings');
+                if (retry) retry.addEventListener('click', loadExamplesSettings);
                 return;
             }
+            const data = await resp.json();
+            const examples = data.examples || [];
+            list.innerHTML = '';
+            if (!examples.length) {
+                list.innerHTML = '<div class="text-muted">No example commands configured.</div>';
+                return;
+            }
+            examples.forEach(ex => {
+                const div = document.createElement('div');
+                div.className = 'example-item guider-item';
+                div.innerHTML = `<div style="flex:1">${escapeHtml(ex)}</div>`;
+                const del = document.createElement('button');
+                del.className = 'btn btn-sm btn-outline-danger';
+                del.textContent = 'Delete';
+                del.addEventListener('click', async () => {
+                    try {
+                        const r = await fetch('/api/settings/examples', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ example: ex }) });
+                        if (r.ok) loadExamplesSettings(); else alert('Failed to delete example');
+                    } catch (e) { console.error(e); alert('Failed to delete example'); }
+                });
+                div.appendChild(del);
+                list.appendChild(div);
+            });
+        } catch (e) {
+            console.error('Failed to load examples', e);
+            list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
+        }
+    }
 
-            const formData = new FormData();
-            if (sourceUrl) formData.append('url', sourceUrl);
-            if (sourceFile) formData.append('file', sourceFile);
+    async function addExample(ev) {
+        ev.preventDefault();
+        const input = document.getElementById('new-example');
+        const val = input.value && input.value.trim();
+        if (!val) return alert('Please enter an example command');
+        try {
+            const r = await fetch('/api/settings/examples', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ example: val }) });
+            if (r.ok) {
+                input.value = '';
+                loadExamplesSettings();
+            } else {
+                const j = await r.json();
+                alert('Failed to add example: ' + (j.error || r.statusText));
+            }
+        } catch (e) { console.error(e); alert('Failed to add example'); }
+    }
 
-            fetch('/api/settings/sources', {
+    // Ensure examples are loaded alongside other settings
+    document.addEventListener('DOMContentLoaded', () => {
+        loadExamplesSettings();
+    });
+
+    async function saveProviders() {
+        try {
+            const res = await fetch('/api/llm/providers');
+            const providers = await res.json();
+            const payload = { providers: {} };
+            for (const name of Object.keys(providers)) {
+                payload.providers[name] = {
+                    enabled: document.getElementById(`prov-${name}-enabled`).checked,
+                    priority: parseInt(document.getElementById(`prov-${name}-priority`).value || '99', 10),
+                    api_key: document.getElementById(`prov-${name}-apikey`).value || undefined,
+                    model: document.getElementById(`prov-${name}-model`).value || providers[name].model || ''
+                };
+            }
+            const resp = await fetch('/api/llm/providers', {
                 method: 'POST',
-                body: formData
-            })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        addSourceToList(result.source);
-                        document.getElementById('new-source-url').value = '';
-                        document.getElementById('source-file').value = '';
-                    } else {
-                        throw new Error(result.error || 'Failed to add source');
-                    }
-                })
-                .catch(error => {
-                    alert('Error adding source: ' + error.message);
-                });
-        }
-
-        function addSourceToList(source) {
-            const sourcesList = document.getElementById('sources-list');
-            const div = document.createElement('div');
-            div.className = 'source-item';
-            div.innerHTML = `
-                <span>${source.url || source.filename}</span>
-                <button onclick="removeSource(this)" class="btn btn-remove">
-                    <i class="fas fa-times"></i>
-                </button>
-            `;
-            sourcesList.appendChild(div);
-        }
-
-        function removeSource(button) {
-            const item = button.parentElement;
-            const sourceId = item.querySelector('span').textContent;
-
-            fetch('/api/settings/sources', {
-                method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source: sourceId })
-            })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        item.remove();
-                    } else {
-                        throw new Error(result.error || 'Failed to remove source');
-                    }
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) throw new Error(data.error || 'Failed to save');
+            alert('Provider settings saved');
+        } catch (e) {
+            alert('Error saving providers: ' + e.message);
+        }
+    }
+
+    document.getElementById('saveProvidersBtn').addEventListener('click', saveProviders);
+
+    async function saveProviderSettings(event, provider) {
+        event.preventDefault();
+
+        const form = event.target;
+        const formData = new FormData(form);
+        const config = {};
+
+        for (let [key, value] of formData.entries()) {
+            config[key] = value;
+        }
+
+        try {
+            const response = await fetch('/api/llm/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    provider: provider,
+                    config: config
                 })
-                .catch(error => {
-                    alert('Error removing source: ' + error.message);
-                });
-        }
+            });
 
-        // ===== Visualization Settings =====
-        function setupChartOptions(preferred = []) {
-            const chartTypes = [
-                'bar', 'line', 'pie', 'scatter', 'heatmap',
-                'timeline', 'comparison', 'distribution'
-            ];
-
-            const container = document.getElementById('chart-options');
-            container.innerHTML = chartTypes.map(type => `
-                <div class="viz-option ${preferred.includes(type) ? 'active' : ''}"
-                     onclick="toggleChartOption(this)"
-                     data-type="${type}">
-                    ${type.charAt(0).toUpperCase() + type.slice(1)}
-                </div>
-            `).join('');
-        }
-
-        function toggleChartOption(element) {
-            element.classList.toggle('active');
-        }
-
-        function saveSettings() {
-            const settings = {
-                visualization: {
-                    preferred_charts: Array.from(document.querySelectorAll('.viz-option.active'))
-                        .map(el => el.dataset.type),
-                    default_format: document.getElementById('default-format').value
+            if (!response.ok) {
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.indexOf("application/json") !== -1) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error ${response.status}`);
+                } else {
+                    const text = await response.text();
+                    console.error('Server returned:', text);
+                    throw new Error(`HTTP error ${response.status}`);
                 }
+            }
+
+            const data = await response.json();
+            if (data.success) {
+                alert('Settings saved successfully');
+            } else {
+                throw new Error(data.error || 'Failed to save settings');
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Error saving settings: ' + error.message);
+        }
+    }
+
+    async function testProvider(provider) {
+        try {
+            const response = await fetch('/api/llm/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ provider: provider })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                alert(data.message || 'Connection test successful');
+            } else {
+                throw new Error(data.error || 'Connection test failed');
+            }
+        } catch (error) {
+            console.error('Error testing connection:', error);
+            alert('Error testing connection: ' + error.message);
+        }
+    }
+
+    // ===== Ollama Local Model Management =====
+    async function checkOllamaStatus() {
+        const statusDiv = document.getElementById('ollamaStatus');
+        try {
+            const response = await fetch('/api/llm/ollama/status');
+            const data = await response.json();
+
+            if (data.running) {
+                statusDiv.className = 'alert alert-success';
+                statusDiv.textContent = 'Ollama is running';
+                loadOllamaModels();
+            } else {
+                statusDiv.className = 'alert alert-warning';
+                statusDiv.textContent = 'Ollama is not running';
+            }
+        } catch (error) {
+            statusDiv.className = 'alert alert-danger';
+            statusDiv.textContent = 'Error checking Ollama status';
+        }
+    }
+
+    async function loadOllamaModels() {
+        const modelList = document.querySelector('.model-list');
+        try {
+            const response = await fetch('/api/llm/ollama/models');
+            const data = await response.json();
+
+            modelList.innerHTML = data.models.map(model => `
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="model-${model.name}" 
+                                ${model.installed ? 'checked' : ''}>
+                            <label class="form-check-label" for="model-${model.name}">
+                                ${model.name} ${model.installed ? '(Installed)' : ''}
+                            </label>
+                        </div>
+                    `).join('');
+        } catch (error) {
+            modelList.innerHTML = '<div class="alert alert-danger">Error loading models</div>';
+        }
+    }
+
+    document.getElementById('pullModels').addEventListener('click', async () => {
+        try {
+            const response = await fetch('/api/llm/ollama/pull', {
+                method: 'POST'
+            });
+            const data = await response.json();
+            if (data.success) {
+                alert('Models pulled successfully');
+                loadOllamaModels();
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            alert('Error pulling models: ' + error.message);
+        }
+    });
+
+    document.getElementById('checkOllama').addEventListener('click', checkOllamaStatus);
+
+    // ===== Training Data Management =====
+    function addGuider(event) {
+        event.preventDefault();
+        const guiderText = document.getElementById('new-guider').value.trim();
+        if (!guiderText) return;
+
+        fetch('/api/settings/guiders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ guider: guiderText })
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    addGuiderToList(guiderText);
+                    document.getElementById('new-guider').value = '';
+                } else {
+                    throw new Error(result.error || 'Failed to add training data');
+                }
+            })
+            .catch(error => {
+                alert('Error adding training data: ' + error.message);
+            });
+    }
+
+    function addGuiderToList(guider) {
+        const guidersList = document.getElementById('guiders-list');
+        const div = document.createElement('div');
+        div.className = 'guider-item';
+        div.innerHTML = `
+                    <span>${guider}</span>
+                    <button onclick="removeGuider(this)" class="btn btn-remove">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+        guidersList.appendChild(div);
+    }
+
+    function removeGuider(button) {
+        const item = button.parentElement;
+        const guiderText = item.querySelector('span').textContent;
+
+        fetch('/api/settings/guiders', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ guider: guiderText })
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    item.remove();
+                } else {
+                    throw new Error(result.error || 'Failed to remove training data');
+                }
+            })
+            .catch(error => {
+                alert('Error removing training data: ' + error.message);
+            });
+    }
+
+    // ===== Context Sources Management =====
+    function addSource(event) {
+        event.preventDefault();
+        const sourceUrl = document.getElementById('new-source-url').value.trim();
+        const sourceFile = document.getElementById('source-file').files[0];
+
+        if (!sourceUrl && !sourceFile) {
+            alert('Please provide either a URL or a file');
+            return;
+        }
+
+        const formData = new FormData();
+        if (sourceUrl) formData.append('url', sourceUrl);
+        if (sourceFile) formData.append('file', sourceFile);
+
+        fetch('/api/settings/sources', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    addSourceToList(result.source);
+                    document.getElementById('new-source-url').value = '';
+                    document.getElementById('source-file').value = '';
+                } else {
+                    throw new Error(result.error || 'Failed to add source');
+                }
+            })
+            .catch(error => {
+                alert('Error adding source: ' + error.message);
+            });
+    }
+
+    function addSourceToList(source) {
+        const sourcesList = document.getElementById('sources-list');
+        const div = document.createElement('div');
+        div.className = 'source-item';
+        div.innerHTML = `
+                    <span>${source.url || source.filename}</span>
+                    <button onclick="removeSource(this)" class="btn btn-remove">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+        sourcesList.appendChild(div);
+    }
+
+    function removeSource(button) {
+        const item = button.parentElement;
+        const sourceId = item.querySelector('span').textContent;
+
+        fetch('/api/settings/sources', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: sourceId })
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    item.remove();
+                } else {
+                    throw new Error(result.error || 'Failed to remove source');
+                }
+            })
+            .catch(error => {
+                alert('Error removing source: ' + error.message);
+            });
+    }
+
+    // ===== Visualization Settings =====
+    function setupChartOptions(preferred = []) {
+        const chartTypes = [
+            'bar', 'line', 'pie', 'scatter', 'heatmap',
+            'timeline', 'comparison', 'distribution'
+        ];
+
+        const container = document.getElementById('chart-options');
+        container.innerHTML = chartTypes.map(type => `
+                    <div class="viz-option ${preferred.includes(type) ? 'active' : ''}"
+                        onclick="toggleChartOption(this)"
+                        data-type="${type}">
+                        ${type.charAt(0).toUpperCase() + type.slice(1)}
+                    </div>
+                `).join('');
+    }
+
+    function toggleChartOption(element) {
+        element.classList.toggle('active');
+    }
+
+    function saveSettings() {
+        const settings = {
+            visualization: {
+                preferred_charts: Array.from(document.querySelectorAll('.viz-option.active'))
+                    .map(el => el.dataset.type),
+                default_format: document.getElementById('default-format').value
+            }
+        };
+
+        fetch('/api/settings/visualization', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings.visualization)
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    alert('Settings saved successfully');
+                } else {
+                    throw new Error(result.error || 'Failed to save settings');
+                }
+            })
+            .catch(error => {
+                alert('Error saving settings: ' + error.message);
+            });
+    }
+
+    // ===== Load All Settings =====
+    function loadSettings() {
+        // Load provider settings
+        fetch('/api/llm/config')
+            .then(response => response.json())
+            .then(data => {
+                const config = data.providers || {};
+                for (const [provider, settings] of Object.entries(config)) {
+                    const form = document.getElementById(`${provider}Form`);
+                    if (form) {
+                        for (const [key, value] of Object.entries(settings)) {
+                            const input = form.querySelector(`[name="${key}"]`);
+                            if (input) {
+                                input.value = value;
+                            }
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error loading LLM settings:', error);
+            });
+
+        // Load training data
+        fetch('/api/settings/guiders')
+            .then(response => response.json())
+            .then(data => {
+                const guidersList = document.getElementById('guiders-list');
+                guidersList.innerHTML = '';
+                data.guiders.forEach(guider => {
+                    addGuiderToList(guider);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading training data:', error);
+            });
+
+        // Load context sources
+        fetch('/api/settings/sources')
+            .then(response => response.json())
+            .then(data => {
+                const sourcesList = document.getElementById('sources-list');
+                sourcesList.innerHTML = '';
+                data.sources.forEach(source => {
+                    addSourceToList(source);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading context sources:', error);
+            });
+
+        // Load visualization preferences
+        fetch('/api/settings/visualization')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('default-format').value = data.default_format || 'html';
+                setupChartOptions(data.preferred_charts || []);
+            })
+            .catch(error => {
+                console.error('Error loading visualization settings:', error);
+                setupChartOptions();
+            });
+    }
+
+    // ===== SMTP Settings =====
+    async function loadSmtpSettings() {
+        try {
+            const res = await fetch('/api/config/smtp');
+            if (!res.ok) throw new Error('Failed to load SMTP settings');
+            const cfg = await res.json();
+            document.getElementById('smtp-host').value = cfg.host || '';
+            document.getElementById('smtp-port').value = cfg.port || 587;
+            document.getElementById('smtp-username').value = cfg.username || '';
+            // password placeholder is shown as (saved) by server
+            document.getElementById('smtp-password').placeholder = cfg.password ? '(saved)' : '';
+            document.getElementById('smtp-from').value = cfg.from_address || cfg.from || '';
+            document.getElementById('smtp-tls').checked = cfg.use_tls === undefined ? true : !!cfg.use_tls;
+        } catch (e) {
+            console.error('Error loading SMTP settings', e);
+        }
+    }
+
+    async function saveSmtpSettings() {
+        try {
+            const payload = {
+                host: document.getElementById('smtp-host').value.trim(),
+                port: parseInt(document.getElementById('smtp-port').value || '587', 10),
+                username: document.getElementById('smtp-username').value.trim(),
+                password: document.getElementById('smtp-password').value || undefined,
+                use_tls: document.getElementById('smtp-tls').checked,
+                from_address: document.getElementById('smtp-from').value.trim()
             };
 
-            fetch('/api/settings/visualization', {
+            const resp = await fetch('/api/config/smtp', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings.visualization)
-            })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        alert('Settings saved successfully');
-                    } else {
-                        throw new Error(result.error || 'Failed to save settings');
-                    }
-                })
-                .catch(error => {
-                    alert('Error saving settings: ' + error.message);
-                });
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to save SMTP settings');
+            alert('SMTP settings saved');
+            // blank the password input after save
+            document.getElementById('smtp-password').value = '';
+            document.getElementById('smtp-password').placeholder = '(saved)';
+        } catch (e) {
+            console.error('Error saving SMTP settings', e);
+            alert('Error saving SMTP settings: ' + (e.message || e));
+        }
+    }
+
+    document.getElementById('saveSmtpBtn').addEventListener('click', saveSmtpSettings);
+
+    async function saveProviderSettings(event, provider) {
+        event.preventDefault();
+
+        const form = event.target;
+        const formData = new FormData(form);
+        const config = {};
+
+        for (let [key, value] of formData.entries()) {
+            config[key] = value;
         }
 
-        // ===== Load All Settings =====
-        function loadSettings() {
-            // Load provider settings
-            fetch('/api/llm/config')
-                .then(response => response.json())
-                .then(data => {
-                    const config = data.providers || {};
-                    for (const [provider, settings] of Object.entries(config)) {
-                        const form = document.getElementById(`${provider}Form`);
-                        if (form) {
-                            for (const [key, value] of Object.entries(settings)) {
-                                const input = form.querySelector(`[name="${key}"]`);
-                                if (input) {
-                                    input.value = value;
-                                }
+        try {
+            const response = await fetch('/api/llm/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    provider: provider,
+                    config: config
+                })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                alert(data.message || 'Settings saved successfully');
+            } else {
+                throw new Error(data.error || 'Failed to save settings');
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Error saving settings: ' + error.message);
+        }
+    }
+
+    function loadSettings() {
+        // Load current config
+        fetch('/api/llm/config')
+            .then(response => response.json())
+            .then(data => {
+                const config = data.providers || {};
+                for (const [provider, settings] of Object.entries(config)) {
+                    const form = document.getElementById(`${provider}Form`);
+                    if (form) {
+                        for (const [key, value] of Object.entries(settings)) {
+                            const input = form.querySelector(`[name="${key}"]`);
+                            if (input) {
+                                input.value = value;
                             }
                         }
                     }
-                })
-                .catch(error => {
-                    console.error('Error loading LLM settings:', error);
-                });
-
-            // Load training data
-            fetch('/api/settings/guiders')
-                .then(response => response.json())
-                .then(data => {
-                    const guidersList = document.getElementById('guiders-list');
-                    guidersList.innerHTML = '';
-                    data.guiders.forEach(guider => {
-                        addGuiderToList(guider);
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading training data:', error);
-                });
-
-            // Load context sources
-            fetch('/api/settings/sources')
-                .then(response => response.json())
-                .then(data => {
-                    const sourcesList = document.getElementById('sources-list');
-                    sourcesList.innerHTML = '';
-                    data.sources.forEach(source => {
-                        addSourceToList(source);
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading context sources:', error);
-                });
-
-            // Load visualization preferences
-            fetch('/api/settings/visualization')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('default-format').value = data.default_format || 'html';
-                    setupChartOptions(data.preferred_charts || []);
-                })
-                .catch(error => {
-                    console.error('Error loading visualization settings:', error);
-                    setupChartOptions();
-                });
-        }
-
-        // ===== SMTP Settings =====
-        async function loadSmtpSettings() {
-            try {
-                const res = await fetch('/api/config/smtp');
-                if (!res.ok) throw new Error('Failed to load SMTP settings');
-                const cfg = await res.json();
-                document.getElementById('smtp-host').value = cfg.host || '';
-                document.getElementById('smtp-port').value = cfg.port || 587;
-                document.getElementById('smtp-username').value = cfg.username || '';
-                // password placeholder is shown as (saved) by server
-                document.getElementById('smtp-password').placeholder = cfg.password ? '(saved)' : '';
-                document.getElementById('smtp-from').value = cfg.from_address || cfg.from || '';
-                document.getElementById('smtp-tls').checked = cfg.use_tls === undefined ? true : !!cfg.use_tls;
-            } catch (e) {
-                console.error('Error loading SMTP settings', e);
-            }
-        }
-
-        async function saveSmtpSettings() {
-            try {
-                const payload = {
-                    host: document.getElementById('smtp-host').value.trim(),
-                    port: parseInt(document.getElementById('smtp-port').value || '587', 10),
-                    username: document.getElementById('smtp-username').value.trim(),
-                    password: document.getElementById('smtp-password').value || undefined,
-                    use_tls: document.getElementById('smtp-tls').checked,
-                    from_address: document.getElementById('smtp-from').value.trim()
-                };
-
-                const resp = await fetch('/api/config/smtp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await resp.json();
-                if (!resp.ok) throw new Error(data.error || 'Failed to save SMTP settings');
-                alert('SMTP settings saved');
-                // blank the password input after save
-                document.getElementById('smtp-password').value = '';
-                document.getElementById('smtp-password').placeholder = '(saved)';
-            } catch (e) {
-                console.error('Error saving SMTP settings', e);
-                alert('Error saving SMTP settings: ' + (e.message || e));
-            }
-        }
-
-        document.getElementById('saveSmtpBtn').addEventListener('click', saveSmtpSettings);
-
-        async function saveProviderSettings(event, provider) {
-            event.preventDefault();
-
-            const form = event.target;
-            const formData = new FormData(form);
-            const config = {};
-
-            for (let [key, value] of formData.entries()) {
-                config[key] = value;
-            }
-
-            try {
-                const response = await fetch('/api/llm/config', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        provider: provider,
-                        config: config
-                    })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    alert(data.message || 'Settings saved successfully');
-                } else {
-                    throw new Error(data.error || 'Failed to save settings');
                 }
-            } catch (error) {
-                console.error('Error saving settings:', error);
-                alert('Error saving settings: ' + error.message);
-            }
-        }
+            })
+            .catch(error => {
+                console.error('Error loading settings:', error);
+                alert('Error loading settings: ' + error.message);
+            });
+    }
 
-        function loadSettings() {
-            // Load current config
-            fetch('/api/llm/config')
-                .then(response => response.json())
-                .then(data => {
-                    const config = data.providers || {};
-                    for (const [provider, settings] of Object.entries(config)) {
-                        const form = document.getElementById(`${provider}Form`);
-                        if (form) {
-                            for (const [key, value] of Object.entries(settings)) {
-                                const input = form.querySelector(`[name="${key}"]`);
-                                if (input) {
-                                    input.value = value;
-                                }
-                            }
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading settings:', error);
-                    alert('Error loading settings: ' + error.message);
-                });
-        }
-
-        // (Removed duplicate and incomplete function definitions to fix syntax errors)
-    </script>
-</body>
-
-</html>
+    // (Removed duplicate and incomplete function definitions to fix syntax errors)
+</script>
+{% endblock %}

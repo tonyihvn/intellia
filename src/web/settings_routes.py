@@ -465,3 +465,28 @@ def handle_examples():
             return jsonify({'error': 'Failed to delete example'}), 500
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+
+@settings_routes.route('/settings/app', methods=['GET', 'POST'])
+def handle_app_settings():
+    """Get or save simple application settings (auto-send emails, persist password, organization)."""
+    if request.method == 'GET':
+        try:
+            cfg = load_config('app') or {}
+            return jsonify(cfg)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    if request.method == 'POST':
+        try:
+            data = request.get_json() or {}
+            # Only accept simple keys
+            allowed_keys = ['auto_send_emails', 'persist_smtp_password', 'organization_name']
+            out = {}
+            for k in allowed_keys:
+                if k in data:
+                    out[k] = data[k]
+            save_config('app', out)
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500

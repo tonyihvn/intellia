@@ -190,8 +190,19 @@ class QueryHandler:
                     sql_text = full_response
                 explanation = full_response.replace(sql_text, '').strip() if sql_text else ''
 
-            if not sql_text:
-                raise Exception("Failed to generate SQL query.")
+                if not sql_text:
+                    # LLM did not produce SQL. Try to synthesize a schema-aware suggestion
+                    try:
+                        suggestion = self._suggest_sql_from_schema(question, db_connection)
+                        if suggestion and (suggestion.get('sql') or suggestion.get('explanation')):
+                            return {
+                                'sql': (suggestion.get('sql') or '').strip(),
+                                'explanation': suggestion.get('explanation') or explanation or full_response,
+                                'full_response': full_response
+                            }
+                    except Exception:
+                        pass
+                    raise Exception("Failed to generate SQL query.")
 
             return {'sql': sql_text.strip(), 'explanation': explanation, 'full_response': full_response}
 
@@ -203,10 +214,193 @@ class QueryHandler:
                     pass
             raise Exception(f"Error generating SQL: {str(e)}")
 
+    def _suggest_sql_from_schema(self, question: str, db_connection):
+        """Try to propose a best-effort SQL using only tables/columns present in the schema.
+
+        This does not guess column names; it uses heuristics to find likely person/patient and
+        program/enrollment tables and builds a SELECT that the user can review.
+        """
+        try:
+            fetcher = SchemaFetcher(db_connection)
+            tables = fetcher.get_tables() or []
+            table_names = [t.get('table_name') for t in tables]
+
+            # Helper to get columns for a table as set
+            def cols_for(tbl):
+                try:
+                    cols = fetcher.get_table_columns(tbl) or []
+                    names = set()
+                    for c in cols:
+                        # support different shapes
+                        if isinstance(c, dict):
+                            for k in ('column_name', 'Field', 'column'):
+                                if k in c:
+                                    names.add(c[k])
+                                    break
+                            # also consider keys that may be lowercase
+                            for k in ('field', 'column_name'):
+                                if k in c and c[k] not in names:
+                                    names.add(c[k])
+                        else:
+                            # tuple-like fallback
+                            try:
+                                names.add(c[0])
+                            except Exception:
+                                pass
+                    return names
+                except Exception:
+                    return set()
+
+            def primary_key_for(tbl):
+                """Try to determine the primary key column name for a table conservatively."""
+                try:
+                    cols = fetcher.get_table_columns(tbl) or []
+                    # Look for explicit primary key indicators from DESCRIBE results
+                    for c in cols:
+                        if isinstance(c, dict):
+                            # MySQL DESCRIBE often uses 'Field' and 'Key' columns
+                            key = c.get('Key') or c.get('key') or c.get('column_key')
+                            name = c.get('Field') or c.get('column_name') or c.get('column')
+                            if key and str(key).upper() == 'PRI' and name:
+                                return name
+                    # fallback to common conventions
+                    for c in cols:
+                        if isinstance(c, dict):
+                            name = c.get('Field') or c.get('column_name') or c.get('column')
+                        else:
+                            try:
+                                name = c[0]
+                            except Exception:
+                                name = None
+                        if not name:
+                            continue
+                        low = name.lower()
+                        if low == 'id' or low.endswith('_id'):
+                            return name
+                    # last resort
+                    return 'id'
+                except Exception:
+                    return 'id'
+
+            # Find candidate person table (common names or columns)
+            person_table = None
+            person_table_candidates = [t for t in table_names if t and any(x in t.lower() for x in ('person','patient','patient_person','users','person_name'))]
+            if person_table_candidates:
+                person_table = person_table_candidates[0]
+            else:
+                # fallback: find table with first/last name columns
+                for t in table_names:
+                    cs = cols_for(t)
+                    if any(x in cs for x in ('first_name','given_name','givenname','family_name','last_name','name')):
+                        person_table = t
+                        break
+
+            # Find program table (program, programs)
+            program_table = None
+            for t in table_names:
+                if t and 'program' in t.lower():
+                    program_table = t
+                    break
+
+            # Find enrollment/link table: contains person_id and program_id or program_uuid
+            enrollment_table = None
+            for t in table_names:
+                cs = cols_for(t)
+                if any(x in cs for x in ('person_id','patient_id')) and any(x in cs for x in ('program_id','program_uuid','program')):
+                    enrollment_table = t
+                    break
+
+            # If no dedicated enrollment table, look for tables with program_id or program in columns
+            if not enrollment_table:
+                for t in table_names:
+                    cs = cols_for(t)
+                    if any(x in cs for x in ('program_id','program')) and any(x in cs for x in ('person_id','patient_id')):
+                        enrollment_table = t
+                        break
+
+            # Prepare explanation text describing discovered tables
+            parts = []
+            parts.append('I could not generate SQL directly from the LLM. Based on the database schema I inspected, here are candidate tables and columns that might relate to patient enrollment:')
+            if person_table:
+                parts.append(f"- Person table: `{person_table}` (likely contains patient names/identifiers). Columns: {', '.join(sorted(list(cols_for(person_table)) ) )}")
+            else:
+                parts.append('- No obvious person/patient table detected by name; look for tables with name columns (first_name, last_name, given_name).')
+
+            if program_table:
+                parts.append(f"- Program table: `{program_table}`. Columns: {', '.join(sorted(list(cols_for(program_table))) )}")
+            else:
+                parts.append('- No `program` table detected by name. Look for tables/columns containing program identifiers or names.')
+
+            if enrollment_table:
+                parts.append(f"- Enrollment/link table detected: `{enrollment_table}` (contains person/program linkage). Columns: {', '.join(sorted(list(cols_for(enrollment_table))))}")
+            else:
+                parts.append('- No enrollment/link table detected that contains both person_id and program_id columns. If such a table exists, please tell me its name and the relevant column names.')
+
+            # Try to assemble a SQL statement if we have minimal info
+            sql = ''
+            if enrollment_table and person_table and program_table:
+                # find name columns in person_table
+                pcols = cols_for(person_table)
+                name_col = None
+                for c in ('full_name','display_name','name','given_name','givenname','first_name'):
+                    if c in pcols:
+                        name_col = c
+                        break
+                if not name_col:
+                    # try family/given pair
+                    if 'given_name' in pcols and 'family_name' in pcols:
+                        name_col = f"CONCAT({person_table}.given_name, ' ', {person_table}.family_name)"
+
+                # find program name col
+                prog_cols = cols_for(program_table)
+                prog_name_col = None
+                for c in ('name','program_name','display_name'):
+                    if c in prog_cols:
+                        prog_name_col = c
+                        break
+
+                # find linking column names
+                enroll_cols = cols_for(enrollment_table)
+                person_fk = None
+                program_fk = None
+                for c in ('person_id','patient_id'):
+                    if c in enroll_cols:
+                        person_fk = c
+                        break
+                for c in ('program_id','program_uuid','program'):
+                    if c in enroll_cols:
+                        program_fk = c
+                        break
+
+                # determine primary keys for person and program tables when available
+                person_pk = primary_key_for(person_table)
+                program_pk = primary_key_for(program_table)
+
+                # Build JOINs using discovered FK/PK names when possible
+                left_join_person = f"`{enrollment_table}`.`{person_fk}` = `{person_table}`.`{person_pk}`"
+                left_join_program = f"`{enrollment_table}`.`{program_fk}` = `{program_table}`.`{program_pk}`"
+
+                if person_fk and program_fk and prog_name_col and name_col:
+                    sql = f"SELECT {name_col} AS patient_name, {program_table}.{prog_name_col} AS program_name FROM `{enrollment_table}` JOIN `{person_table}` ON {left_join_person} JOIN `{program_table}` ON {left_join_program} WHERE {program_table}.{prog_name_col} = 'HIV Treatment Services' LIMIT 500"
+                else:
+                    # fallback minimal select from enrollment table
+                    sql = f"SELECT * FROM `{enrollment_table}` WHERE `{program_fk or 'program_id'}` IS NOT NULL LIMIT 100"
+
+            explanation = '\n'.join(parts)
+            return {'sql': sql, 'explanation': explanation}
+        except Exception as e:
+            return {'sql': '', 'explanation': f'Could not synthesize SQL from schema: {e}'}
+
     def build_prompt(self, question, db_connection=None):
         """Build the prompt with schema summary and RAG-enhanced context."""
         # 1. Use RAG-based enhanced context (includes a targeted schema snippet)
-        enhanced = self.query_enhancer.enhance_query_context(question)
+        if self.query_enhancer and hasattr(self.query_enhancer, 'rag_manager') and db_connection:
+            try:
+                # Ensure the RAG manager has the current DB schema context available
+                self.query_enhancer.rag_manager.set_db_context(db_connection)
+            except Exception:
+                pass
+        enhanced = self.query_enhancer.enhance_query_context(question) if self.query_enhancer else {'enhanced_prompt': ''}
         enhanced_prompt = enhanced.get('enhanced_prompt', '')
 
         # 2. Construct a concise prompt using only the enhanced context to limit tokens
@@ -284,27 +478,108 @@ Requirements:
         This is intentionally conservative and uses simple token matching for table names.
         """
         try:
+            import re
             conn = get_db_connection()
             if not conn:
                 return {'ok': False, 'error': 'Could not connect to database for validation'}
 
             schema_fetcher = SchemaFetcher(conn)
-            # Get list of tables in DB
+            # Get list of tables in DB (normalize to lower)
             cursor = conn.cursor()
             cursor.execute("SHOW TABLES")
-            tables = [row[0] for row in cursor.fetchall()]
+            tables = [row[0].lower() for row in cursor.fetchall()]
             cursor.close()
+            # Build map of table -> set(columns) (all lower)
+            cols = schema_fetcher.get_columns() or []
+            table_cols = {}
+            for c in cols:
+                t = c.get('table_name')
+                name = c.get('column_name')
+                if t and name:
+                    t_lc = t.lower()
+                    n_lc = name.lower()
+                    if t_lc not in table_cols:
+                        table_cols[t_lc] = set()
+                    table_cols[t_lc].add(n_lc)
 
-            # Simple parser: look for FROM/JOIN `table` or FROM/JOIN table patterns
-            import re
-            found = set()
+            # Find all table aliases in FROM/JOIN clauses
+            alias_pattern = r'(?:from|join)\s+([`\"]?\w+[`\"]?)(?:\s+(?:as\s+)?([`\"]?\w+[`\"]?))?'
+            alias_map = {}  # alias -> base table
+            for match in re.finditer(alias_pattern, sql, re.IGNORECASE):
+                base = match.group(1)
+                alias = match.group(2)
+                base_clean = base.strip('`"').lower() if base else None
+                if alias:
+                    alias_clean = alias.strip('`"').lower()
+                    alias_map[alias_clean] = base_clean
+
+            aliases = set(alias_map.keys())
+
+            # Common SQL keywords and stopwords
+            sql_keywords = set([
+                'select','from','where','and','or','group','by','order','limit','as','count','sum','avg','min','max','distinct','on','left','right','inner','outer','join',
+                'having','case','when','then','else','end','union','all','in','exists','between','like','is','null','not','true','false','asc','desc','coalesce','if','ifnull','cast'
+            ])
+            stopwords = {'the', 'a', 'an', 'of', 'to', 'for', 'in', 'on', 'by', 'with', 'as', 'at', 'from'}
+
+            # Find referenced tables (normalize to lower)
+            found_tables = set()
             for m in re.finditer(r"(?:from|join)\s+[`']?([a-zA-Z0-9_]+)[`']?", sql, flags=re.I):
-                found.add(m.group(1))
+                found_tables.add(m.group(1).lower())
 
-            missing = [t for t in found if t not in tables]
-            if missing:
-                return {'ok': False, 'missing_tables': missing, 'found': list(found), 'tables': tables}
+            missing_tables = [t for t in found_tables if t not in tables and t not in aliases and t not in stopwords]
 
-            return {'ok': True}
+            missing_columns = []
+
+            # Find qualified column references like table.column
+            for m in re.finditer(r"\b([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\b", sql):
+                tname = m.group(1).lower()
+                cname = m.group(2).lower()
+                # resolve alias to base table if needed
+                base_table = alias_map.get(tname, tname)
+                if base_table not in tables and tname not in aliases and tname not in stopwords:
+                    if tname not in missing_tables:
+                        missing_tables.append(tname)
+                else:
+                    # check column exists in base table
+                    cols_set = table_cols.get(base_table, set())
+                    if cname not in cols_set:
+                        missing_columns.append({'table': base_table, 'column': cname})
+
+            # Heuristic: check unqualified column names in SELECT and WHERE sections
+            try:
+                select_part = re.search(r"select\s+(.*?)\s+from\s", sql, flags=re.I | re.S)
+                if select_part:
+                    sel = select_part.group(1)
+                    items = [i.strip() for i in re.split(r',\s*(?![^()]*\))', sel) if i.strip()]
+                    for item in items:
+                        if '.' in item:
+                            continue
+                        col_name = re.split(r"\s+as\s+|\s+", item, flags=re.I)[0].strip()
+                        mcol = re.match(r"[a-zA-Z_][a-zA-Z0-9_]*", col_name)
+                        if not mcol:
+                            continue
+                        token = mcol.group(0).lower()
+                        if token in sql_keywords:
+                            continue
+                        found = False
+                        for t in (found_tables or tables):
+                            if token in table_cols.get(t, set()):
+                                found = True
+                                break
+                        if not found:
+                            missing_columns.append({'table': None, 'column': token})
+            except Exception:
+                pass
+
+            result = {'ok': True, 'found': list(found_tables), 'tables': tables}
+            if missing_tables:
+                result['ok'] = False
+                result['missing_tables'] = missing_tables
+            if missing_columns:
+                result['ok'] = False
+                result['missing_columns'] = missing_columns
+
+            return result
         except Exception as e:
             return {'ok': False, 'error': str(e)}
