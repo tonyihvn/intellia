@@ -414,14 +414,20 @@ def handle_visualization():
     if request.method == 'GET':
         return jsonify({
             'preferred_charts': config.get('preferred_charts', []),
-            'default_format': config.get('default_format', 'html')
+            'default_format': config.get('default_format', 'html'),
+            'rag_enabled': config.get('rag_enabled', True),
+            'rag_max_tables': config.get('rag_max_tables', 3),
+            'rag_max_rules': config.get('rag_max_rules', 5)
         })
     
     elif request.method == 'POST':
         data = request.get_json()
         save_config('visualization', {
             'preferred_charts': data.get('preferred_charts', []),
-            'default_format': data.get('default_format', 'html')
+            'default_format': data.get('default_format', 'html'),
+            'rag_enabled': bool(data.get('rag_enabled', True)),
+            'rag_max_tables': int(data.get('rag_max_tables', 3)),
+            'rag_max_rules': int(data.get('rag_max_rules', 5))
         })
         return jsonify({'success': True})
 

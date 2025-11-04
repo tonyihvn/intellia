@@ -11,12 +11,96 @@
         margin: 0;
     }
 
+    /* Clarifier modal styles */
+    #clarifyModal {
+        position: fixed;
+        z-index: 1100;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    #clarifyModal .clarify-box {
+        background: #fff;
+        max-width: 820px;
+        width: 100%;
+        border-radius: 8px;
+        padding: 18px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    #clarifyModal .clarify-candidates {
+        margin-top: 12px;
+    }
+
     .command-container {
         background: #fff;
         padding: 10px;
         border-radius: 5px;
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         width: 100%;
+    }
+
+    .result-item {
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        border-left: 3px solid #007bff;
+        white-space: pre-wrap;
+        /* preserve line breaks while still rendering HTML */
+        word-break: break-word;
+    }
+
+    .result-item strong {
+        color: #495057;
+        margin-right: 0.5rem;
+        font-weight: 600;
+    }
+
+    .formatted-list {
+        margin: 0.75rem 0;
+        padding-left: 2rem;
+        list-style-type: disc;
+    }
+
+    .formatted-list li {
+        margin-bottom: 0.25rem;
+        line-height: 1.5;
+    }
+
+    .result-item a {
+        color: #007bff;
+        text-decoration: none;
+        border-bottom: 1px dotted #007bff;
+    }
+
+    .result-item a:hover {
+        color: #0056b3;
+        border-bottom: 1px solid #0056b3;
+    }
+
+    .result-item p {
+        margin: 0.75rem 0;
+        line-height: 1.6;
+        color: #212529;
+    }
+
+    .result-item pre,
+    .result-item code {
+        white-space: pre-wrap;
+        background: #efefef;
+        padding: 0.5rem;
+        border-radius: 4px;
+        display: block;
+        overflow: auto;
     }
 
     .command-input {
@@ -289,7 +373,8 @@
                     <i class="fas fa-history"></i>
                 </button>
                 <div id="historyPanel" class="mb-3">
-                    <button id="newChatBtn" class="btn btn-sm btn-primary mb-2" style="width:100%">+ New Chat</button>
+                    <button id="newChatBtn" class="btn btn-sm btn-primary mb-2" style="width:100%">+ New
+                        Activity</button>
                     <h5 id="historyHeader" style="cursor:pointer">History</h5>
                     <hr>
                     <div id="historyList">Click "History" to load</div>
@@ -301,8 +386,6 @@
 
             <!-- Chat / Results on the RIGHT -->
             <div class="col-md-12">
-
-
                 <!-- SQL editor row (always visible) -->
                 <div id="sqlPanel" class="mt-3">
                     <!-- <div class="d-flex justify-content-between align-items-center"> -->
@@ -323,6 +406,17 @@
                     </div>
 
                 </div>
+            </div>
+        </div>
+        <!-- Clarifier modal: shown when RAG needs table selection -->
+        <div id="clarifyModal">
+            <div class="clarify-box">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h5 class="mb-0">Which table should we use?</h5>
+                    <button type="button" class="btn-close" aria-label="Close" onclick="hideClarifyModal()"></button>
+                </div>
+                <div class="clarify-info small text-muted mt-2">Select the most relevant table.</div>
+                <div class="clarify-candidates mt-3"></div>
             </div>
         </div>
 
@@ -386,6 +480,7 @@
 
 {% block extra_js %}
 <!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <!-- jQuery (required by DataTables) -->
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -398,6 +493,38 @@
 <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
 <script src="https://cdn.datatables.net/keytable/2.8.0/js/dataTables.keyTable.min.js"></script>
 <script>
+    // Load schema knowledge and business rules into collapsible lists
+    async function loadKnowledgeLists() {
+        try {
+            const resp = await fetch('/api/rag/knowledge');
+            if (!resp.ok) throw new Error('Failed to load knowledge');
+            const data = await resp.json();
+            // Schema Knowledge
+            const schemaList = document.getElementById('schemaKnowledgeList');
+            if (schemaList) {
+                if (data.schema && data.schema.length > 0) {
+                    schemaList.innerHTML = data.schema.map(item => `<div class='small mb-2' style='border-bottom:1px solid #eee;'>${escapeHtml(item.text)}</div>`).join('');
+                } else {
+                    schemaList.innerHTML = '<div class="text-muted">No schema knowledge added yet.</div>';
+                }
+            }
+            // Business Rules
+            const rulesList = document.getElementById('businessRulesList');
+            if (rulesList) {
+                if (data.business_rules && data.business_rules.length > 0) {
+                    rulesList.innerHTML = data.business_rules.map(item => `<div class='small mb-2' style='border-bottom:1px solid #eee;'>${escapeHtml(item.text)}</div>`).join('');
+                } else {
+                    rulesList.innerHTML = '<div class="text-muted">No business rules added yet.</div>';
+                }
+            }
+        } catch (e) {
+            const schemaList = document.getElementById('schemaKnowledgeList');
+            if (schemaList) schemaList.innerHTML = '<div class="text-danger">Failed to load schema knowledge</div>';
+            const rulesList = document.getElementById('businessRulesList');
+            if (rulesList) rulesList.innerHTML = '<div class="text-danger">Failed to load business rules</div>';
+        }
+    }
+    document.addEventListener('DOMContentLoaded', loadKnowledgeLists);
     // Mobile sidebar expand/collapse logic
     function isMobile() {
         return window.innerWidth <= 768;
@@ -505,6 +632,10 @@
                     } else {
                         document.getElementById('sqlEditor').value = '';
                     }
+                } else if (data.type === 'clarify') {
+                    // Show clarifier modal and a short assistant prompt
+                    try { appendChat('assistant', data.prompt || 'Please select which table(s) to use.'); } catch (e) { }
+                    showClarifyModal(data.candidates || [], command);
                 } else if (data.type === 'query_preview' || data.type === 'action_preview') {
                     // Show all explanations, business rules, and reasoning in the chat
                     const assistantText = [
@@ -749,16 +880,27 @@
     updateConfirmBtnState();
 
     document.getElementById('confirmBtn').addEventListener('click', async () => {
-        // Always allow execution with just SQL; use history id if present, but never require preview
+        // Support both SQL and non-SQL actions (like send_email)
         const preview = window.latestPreview || {};
         const historyId = preview._history_id || preview.history_id || null;
         const editedSql = document.getElementById('sqlEditor').value;
-        if (!editedSql || !editedSql.trim()) {
-            alert('Please enter SQL to execute.');
-            return;
-        }
-        const payload = { sql: editedSql, command: document.getElementById('commandInput').value };
+        const commandText = document.getElementById('commandInput').value;
+        let payload = { command: commandText };
         if (historyId) payload.history_id = historyId;
+
+        // If this is an action (like send_email), send the action object; otherwise, send SQL
+        if (preview && preview.type && preview.type.startsWith('action') && preview.action) {
+            payload.action = preview.action;
+            // Only include SQL if present and not empty
+            if (editedSql && editedSql.trim()) payload.sql = editedSql.trim();
+        } else {
+            // For SQL or query actions, require SQL
+            if (!editedSql || !editedSql.trim()) {
+                alert('Please enter SQL to execute.');
+                return;
+            }
+            payload.sql = editedSql.trim();
+        }
 
         try {
             const confirmResultEl = document.getElementById('confirmResult');
@@ -806,24 +948,21 @@
                 } else {
                     // No formatted payload provided — show brief structured result
                     if (res.results) {
-                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Query executed successfully. Showing up to 10 rows below.</div>`;
-                        // Render small table for first 10 rows
-                        const rows = Array.isArray(res.results) ? res.results.slice(0, 10) : [];
+                        // Do NOT auto-render tables. Show an explicit button to display results.
+                        const rows = Array.isArray(res.results) ? res.results : [];
+                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Query executed successfully. ${rows.length} rows available.</div>`;
                         if (rows.length > 0) {
-                            let cols = Object.keys(rows[0]);
-                            // Build a DOM table so we can initialize DataTables on it
-                            const tbl = document.createElement('table');
-                            tbl.className = 'table table-sm table-striped generated-datatable';
-                            const thead = document.createElement('thead');
-                            const headerRow = document.createElement('tr');
-                            cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; headerRow.appendChild(th); });
-                            thead.appendChild(headerRow);
-                            tbl.appendChild(thead);
-                            const tbody = document.createElement('tbody');
-                            rows.forEach(r => { const tr = document.createElement('tr'); cols.forEach(c => { const td = document.createElement('td'); td.textContent = String(r[c] === null ? '' : r[c]); tr.appendChild(td); }); tbody.appendChild(tr); });
-                            tbl.appendChild(tbody);
-                            confirmResultEl.appendChild(tbl);
-                            try { enhanceTablesIn(confirmResultEl); } catch (e) { console.warn('enhanceTablesIn error', e); }
+                            const btn = document.createElement('button');
+                            btn.className = 'btn btn-sm btn-outline-primary';
+                            btn.textContent = `Show ${Math.min(100, rows.length)} rows as table`;
+                            btn.addEventListener('click', () => {
+                                // Render up to 100 rows when user explicitly requests
+                                const toShow = rows.slice(0, 100);
+                                const container = document.createElement('div');
+                                displayTable(toShow, container);
+                                confirmResultEl.appendChild(container);
+                            });
+                            confirmResultEl.appendChild(btn);
                         }
                     } else {
                         confirmResultEl.innerHTML = `<div class='alert alert-success'>Action executed successfully.</div>`;
@@ -908,91 +1047,80 @@
             tabularData = data.data;
         }
 
-        // Add view mode toggles if tabular data is available
+        // If tabular data is available, do NOT auto-render table/chart/analysis.
+        // Instead show explicit buttons the user must click to render each view.
         if (tabularData && tabularData.length > 0) {
-            const viewBar = document.createElement('div');
-            viewBar.className = 'mb-2';
-            viewBar.innerHTML = `
-                <div class="btn-group" role="group" aria-label="Result View Modes">
-                    <button id="viewTableBtn" class="btn btn-sm btn-outline-primary">Table</button>
-                    <button id="viewChartBtn" class="btn btn-sm btn-outline-primary">Chart</button>
-                    <button id="viewAnalysisBtn" class="btn btn-sm btn-outline-primary">Analysis</button>
-                </div>
-            `;
-            resultDiv.appendChild(viewBar);
+            const info = document.createElement('div');
+            info.className = 'mb-2';
+            info.innerHTML = `<div class='alert alert-info'>${tabularData.length} rows available. Click a view to render.</div>`;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group mb-2';
+            const tableBtn = document.createElement('button');
+            tableBtn.className = 'btn btn-sm btn-outline-primary';
+            tableBtn.textContent = 'Show Table';
+            const chartBtn = document.createElement('button');
+            chartBtn.className = 'btn btn-sm btn-outline-primary';
+            chartBtn.textContent = 'Show Chart';
+            const analysisBtn = document.createElement('button');
+            analysisBtn.className = 'btn btn-sm btn-outline-primary';
+            analysisBtn.textContent = 'Show Analysis';
+            btnGroup.appendChild(tableBtn);
+            btnGroup.appendChild(chartBtn);
+            btnGroup.appendChild(analysisBtn);
+            resultDiv.appendChild(info);
+            resultDiv.appendChild(btnGroup);
 
-            const tableContainer = document.createElement('div');
-            tableContainer.id = 'resultTableContainer';
-            resultDiv.appendChild(tableContainer);
-            const chartContainer = document.createElement('div');
-            chartContainer.id = 'resultChartContainer';
-            chartContainer.style.display = 'none';
-            resultDiv.appendChild(chartContainer);
-            const analysisContainer = document.createElement('div');
-            analysisContainer.id = 'resultAnalysisContainer';
-            analysisContainer.style.display = 'none';
-            resultDiv.appendChild(analysisContainer);
-
-            // Table view
-            tableContainer.innerHTML = '';
-            displayTable(tabularData, tableContainer);
-
-            // Chart view
-            chartContainer.innerHTML = '';
-            const keys = Object.keys(tabularData[0]);
-            const labelKey = keys[0];
-            const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
-            const canvas = document.createElement('canvas');
-            canvas.id = 'resultChart';
-            chartContainer.appendChild(canvas);
-            new Chart(canvas.getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels: tabularData.map(row => row[labelKey]),
-                    datasets: [{
-                        label: valueKey,
-                        data: tabularData.map(row => row[valueKey]),
-                        backgroundColor: '#3498db'
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
+            // Containers are created lazily when requested
+            let tableRendered = false, chartRendered = false, analysisRendered = false;
+            tableBtn.addEventListener('click', () => {
+                if (tableRendered) return;
+                const tableContainer = document.createElement('div');
+                resultDiv.appendChild(tableContainer);
+                displayTable(tabularData, tableContainer);
+                tableRendered = true;
             });
-
-            // Analysis view (simple summary/comparison)
-            analysisContainer.innerHTML = '';
-            let summary = `<b>Analysis & Comparisons:</b><br>`;
-            summary += `Rows: ${tabularData.length}<br>`;
-            if (valueKey) {
-                const values = tabularData.map(row => Number(row[valueKey])).filter(v => !isNaN(v));
-                if (values.length > 0) {
-                    const min = Math.min(...values);
-                    const max = Math.max(...values);
-                    const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
-                    summary += `Min ${valueKey}: ${min}<br>Max ${valueKey}: ${max}<br>Avg ${valueKey}: ${avg}<br>`;
+            chartBtn.addEventListener('click', () => {
+                if (chartRendered) return;
+                const chartContainer = document.createElement('div');
+                resultDiv.appendChild(chartContainer);
+                // Create a simple bar chart if numeric column exists
+                const keys = Object.keys(tabularData[0]);
+                const labelKey = keys[0];
+                const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                const canvas = document.createElement('canvas');
+                canvas.style.maxHeight = '400px';
+                chartContainer.appendChild(canvas);
+                new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: tabularData.map(row => row[labelKey]),
+                        datasets: [{ label: valueKey, data: tabularData.map(row => row[valueKey]), backgroundColor: '#3498db' }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                chartRendered = true;
+            });
+            analysisBtn.addEventListener('click', () => {
+                if (analysisRendered) return;
+                const analysisContainer = document.createElement('div');
+                resultDiv.appendChild(analysisContainer);
+                // Simple analysis summary
+                let summary = `<b>Analysis & Comparisons:</b><br>`;
+                summary += `Rows: ${tabularData.length}<br>`;
+                const keys = Object.keys(tabularData[0]);
+                const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                if (valueKey) {
+                    const values = tabularData.map(row => Number(row[valueKey])).filter(v => !isNaN(v));
+                    if (values.length > 0) {
+                        const min = Math.min(...values);
+                        const max = Math.max(...values);
+                        const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
+                        summary += `Min ${valueKey}: ${min}<br>Max ${valueKey}: ${max}<br>Avg ${valueKey}: ${avg}<br>`;
+                    }
                 }
-            }
-            analysisContainer.innerHTML = summary;
-
-            // Toggle logic
-            document.getElementById('viewTableBtn').onclick = () => {
-                tableContainer.style.display = 'block';
-                chartContainer.style.display = 'none';
-                analysisContainer.style.display = 'none';
-            };
-            document.getElementById('viewChartBtn').onclick = () => {
-                tableContainer.style.display = 'none';
-                chartContainer.style.display = 'block';
-                analysisContainer.style.display = 'none';
-            };
-            document.getElementById('viewAnalysisBtn').onclick = () => {
-                tableContainer.style.display = 'none';
-                chartContainer.style.display = 'none';
-                analysisContainer.style.display = 'block';
-            };
-            // Default to table view
-            tableContainer.style.display = 'block';
-            chartContainer.style.display = 'none';
-            analysisContainer.style.display = 'none';
+                analysisContainer.innerHTML = summary;
+                analysisRendered = true;
+            });
             return;
         }
 
@@ -1003,11 +1131,11 @@
             return;
         }
         if (Array.isArray(data.results) && data.results.length > 0) {
-            displayTable(data.results);
+            displayData(data.results);
             return;
         }
         if (Array.isArray(data.data) && data.data.length > 0) {
-            displayTable(data.data);
+            displayData(data.data);
             return;
         }
         if (data.response) {
@@ -1018,17 +1146,29 @@
     }
 
     function displayData(data) {
+        // Do not auto-render table/chart/analysis. Provide explicit buttons to the user.
         const resultDiv = document.getElementById('result');
         resultDiv.innerHTML = '';
         if (!data) return;
         if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
-            // If first row has numeric values, show chart else table
-            const numericField = Object.keys(data[0]).find(k => typeof data[0][k] === 'number');
-            if (numericField && Object.keys(data[0]).length <= 2) {
-                displayChart(data);
-            } else {
-                displayTable(data);
-            }
+            const info = document.createElement('div');
+            info.className = 'mb-2';
+            info.innerHTML = `<div class='alert alert-info'>${data.length} rows available. Click a view to render.</div>`;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group mb-2';
+            const tableBtn = document.createElement('button');
+            tableBtn.className = 'btn btn-sm btn-outline-primary';
+            tableBtn.textContent = 'Show Table';
+            const chartBtn = document.createElement('button');
+            chartBtn.className = 'btn btn-sm btn-outline-primary';
+            chartBtn.textContent = 'Show Chart';
+            btnGroup.appendChild(tableBtn);
+            btnGroup.appendChild(chartBtn);
+            resultDiv.appendChild(info);
+            resultDiv.appendChild(btnGroup);
+
+            tableBtn.addEventListener('click', () => displayTable(data));
+            chartBtn.addEventListener('click', () => displayChart(data));
             return;
         }
 
@@ -1131,30 +1271,138 @@
         }
     }
 
+    function sanitizeAndFormat(content) {
+        // Allow a small whitelist of tags and attributes and remove anything else.
+        const allowedTags = new Set(['b', 'i', 'strong', 'em', 'p', 'ul', 'ol', 'li', 'br', 'a', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5']);
+
+        function sanitizeHtml(input) {
+            // Parse the HTML and rebuild only allowed nodes/attributes
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(input, 'text/html');
+
+            function walk(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    return document.createTextNode(node.textContent);
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) {
+                    return document.createDocumentFragment();
+                }
+                const tag = node.tagName.toLowerCase();
+                if (!allowedTags.has(tag)) {
+                    // Replace disallowed element with its children (no tag)
+                    const frag = document.createDocumentFragment();
+                    node.childNodes.forEach(child => frag.appendChild(walk(child)));
+                    return frag;
+                }
+
+                const el = document.createElement(tag);
+                // Allowed attributes: only href/title/target for <a>
+                if (tag === 'a') {
+                    const href = node.getAttribute('href');
+                    if (href && /^(https?:\/\/|mailto:|\/)/i.test(href)) {
+                        el.setAttribute('href', href);
+                        el.setAttribute('target', '_blank');
+                        el.setAttribute('rel', 'noopener noreferrer');
+                    }
+                }
+
+                // Recurse children
+                node.childNodes.forEach(child => el.appendChild(walk(child)));
+                return el;
+            }
+
+            const container = document.createElement('div');
+            doc.body.childNodes.forEach(child => container.appendChild(walk(child)));
+            return container.innerHTML;
+        }
+
+        // If the input contains HTML tags, sanitize and return
+        if (/<[^>]+>/.test(content)) {
+            return sanitizeHtml(content);
+        }
+
+        // Otherwise treat as plain text: escape and format simple things (URLs, markdown links, lists, paragraphs)
+        function escapeHtml(s) {
+            return s.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        let out = escapeHtml(content || '');
+
+        // Markdown links [text](url)
+        out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+            const safeUrl = escapeHtml(url);
+            const safeText = escapeHtml(text);
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+        });
+
+        // URLs -> links
+        out = out.replace(/(https?:\/\/[^\s]+)/g, url => {
+            const s = escapeHtml(url);
+            return `<a href="${s}" target="_blank" rel="noopener noreferrer">${s}</a>`;
+        });
+
+        // Handle bullet lists (lines starting with -, *, •)
+        const lines = out.split(/\r?\n/);
+        let result = '';
+        let inList = false;
+        lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            if (/^([-*•])\s+/.test(trimmed)) {
+                if (!inList) { result += '<ul class="formatted-list">'; inList = true; }
+                result += `<li>${trimmed.replace(/^([-*•])\s+/, '')}</li>`;
+            } else {
+                if (inList) { result += '</ul>'; inList = false; }
+                if (trimmed === '') {
+                    // preserve paragraph separation
+                    result += '<p></p>';
+                } else {
+                    result += `<p>${trimmed}</p>`;
+                }
+            }
+        });
+        if (inList) result += '</ul>';
+
+        // Collapse multiple empty paragraphs
+        result = result.replace(/(<p><\/p>\s*)+/g, '<p></p>');
+        return result || '<div></div>';
+    }
+
     function displayTextResult(data) {
         const resultDiv = document.getElementById('result');
-        const pre = document.createElement('pre');
+
         if (Array.isArray(data)) {
-            pre.textContent = data.map(row =>
-                Object.entries(row)
-                    .map(([key, value]) => `${key}: ${value}`)
-                    .join(', ')
-            ).join('\n');
+            const formattedContent = data.map(row => {
+                const entries = Object.entries(row)
+                    .filter(([k]) => !k.startsWith('_'))
+                    .map(([key, value]) => {
+                        const formattedValue = value && typeof value === 'string'
+                            ? sanitizeAndFormat(value)
+                            : String(value);
+                        return `<strong>${key}:</strong> ${formattedValue}`;
+                    });
+                return `<div class="result-item">${entries.join('<br>')}</div>`;
+            }).join('<hr>');
+            resultDiv.innerHTML = formattedContent;
         } else if (data && typeof data === 'object') {
-            // Filter out internal keys and null values for nicer display
+            // Filter out internal keys and format values
             const filtered = {};
             Object.entries(data).forEach(([k, v]) => {
                 if (k.startsWith('_')) return;
                 if (v === null || v === undefined) return;
-                // Skip internal status fields not useful to the user
-                if (k === 'status' && (v === 'preview' || v === 'executing')) return;
-                filtered[k] = v;
+                filtered[k] = typeof v === 'string' ? sanitizeAndFormat(v) : String(v);
             });
-            pre.textContent = JSON.stringify(filtered, null, 2);
+            const formattedContent = Object.entries(filtered)
+                .map(([key, value]) => `<div class="result-item"><strong>${key}:</strong> ${value}</div>`)
+                .join('');
+            resultDiv.innerHTML = formattedContent;
         } else {
-            pre.textContent = JSON.stringify(data, null, 2);
+            // Handle primitive values
+            resultDiv.innerHTML = `<div class="result-item">${sanitizeAndFormat(String(data))}</div>`;
         }
-        resultDiv.appendChild(pre);
     }
 
     function displaySuccess(message) {
@@ -1183,7 +1431,8 @@
     }
 
     function escapeHtml(unsafe) {
-        return unsafe
+        if (!unsafe) return '';
+        return String(unsafe)
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
@@ -1540,6 +1789,91 @@
         } catch (e) {
             // Fallback: alert with JSON
             alert(JSON.stringify(rowObj, null, 2));
+        }
+    }
+
+    // Clarifier modal JS helpers
+    function showClarifyModal(candidates, question) {
+        let modal = document.getElementById('clarifyModal');
+        if (!modal) return;
+        const list = modal.querySelector('.clarify-candidates');
+        const info = modal.querySelector('.clarify-info');
+        list.innerHTML = '';
+        info.textContent = 'We found multiple candidate tables related to your question. Please choose the most relevant one.';
+        if (!Array.isArray(candidates) || candidates.length === 0) {
+            info.textContent = 'No candidate tables found.';
+        }
+        (candidates || []).slice(0, 12).forEach(c => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-primary m-1';
+            btn.textContent = c;
+            btn.addEventListener('click', async () => {
+                hideClarifyModal();
+                await submitWithSelection(question, [c]);
+            });
+            list.appendChild(btn);
+        });
+
+        // Use all / None
+        const useAll = document.createElement('button');
+        useAll.className = 'btn btn-sm btn-success m-1';
+        useAll.textContent = 'Use all candidates';
+        useAll.addEventListener('click', async () => {
+            hideClarifyModal();
+            await submitWithSelection(question, candidates);
+        });
+        const useNone = document.createElement('button');
+        useNone.className = 'btn btn-sm btn-secondary m-1';
+        useNone.textContent = 'None of the above';
+        useNone.addEventListener('click', async () => {
+            hideClarifyModal();
+            await submitWithSelection(question, []);
+        });
+        list.appendChild(document.createElement('div'));
+        list.appendChild(useAll);
+        list.appendChild(useNone);
+
+        modal.style.display = 'flex';
+    }
+
+    function hideClarifyModal() {
+        const modal = document.getElementById('clarifyModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    async function submitWithSelection(question, selected_tables) {
+        try {
+            // mimic the original submit flow but include selected_tables
+            const button = document.getElementById('submitBtn');
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+            const response = await fetch('/api/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question, conversation: window.chatHistory.slice(-50), selected_tables: selected_tables })
+            });
+            const data = await response.json();
+            window.latestPreview = data;
+
+            // Render assistant message and SQL as usual
+            if (data.type === 'clarify') {
+                // if backend still wants clarification, show modal again using provided candidates
+                showClarifyModal(data.candidates || [], question);
+            } else {
+                // append assistant text
+                const assistantText = data.explanation || data.response || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
+                try { appendChat('assistant', assistantText); } catch (e) { }
+                if (data.sql && typeof data.sql === 'string') document.getElementById('sqlEditor').value = data.sql;
+            }
+
+            button.disabled = false;
+            button.innerHTML = originalText;
+        } catch (e) {
+            console.error(e);
+            hideClarifyModal();
+            try { displayError('Failed to submit selection'); } catch (e2) { }
         }
     }
 </script>

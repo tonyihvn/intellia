@@ -7,6 +7,8 @@ from pathlib import Path
 import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from .schema_context import SchemaContextManager
+from ..llm.client import LLMClient
+from ..config import Config
 
 class SimpleVectorStore:
     def __init__(self, name: str):
@@ -300,6 +302,147 @@ class RAGManager:
         snippet = "\n".join(parts)
         return snippet
 
+    def get_compact_context(self, question: str, max_tables: int = 3, max_rules: int = 5) -> dict:
+        """Return a compact, LLM-compressed context for a given question.
+
+        Steps:
+        - Find a small set of directly relevant tables (prefer explicit mentions or 1-hop relations)
+        - Select a few relevant business rules filtered by those tables
+        - Summarize the selected docs using the LLM to produce a short context
+
+        Returns a dict with keys: summary (str), tables (list), rules (list), clarify (bool), candidates (list)
+        """
+        try:
+            # Allow tuning via settings file (visualization settings include rag knobs)
+            try:
+                vis_cfg_path = os.path.join(Config.CONFIG_DIR, 'visualization.json')
+                if os.path.exists(vis_cfg_path):
+                    with open(vis_cfg_path, 'r') as vf:
+                        vis_cfg = json.load(vf) or {}
+                        cfg_max_tables = int(vis_cfg.get('rag_max_tables', max_tables) or max_tables)
+                        cfg_max_rules = int(vis_cfg.get('rag_max_rules', max_rules) or max_rules)
+                        max_tables = cfg_max_tables
+                        max_rules = cfg_max_rules
+                        logging.debug(f"RAG config loaded: max_tables={max_tables}, max_rules={max_rules}")
+            except Exception as e:
+                logging.debug(f"Failed to load RAG settings: {e}")
+            # Ensure schema context exists
+            if not self.schema_context:
+                return {'summary': '', 'tables': [], 'rules': [], 'clarify': True, 'candidates': []}
+
+            # 1) Use existing helper to find relevant tables (semantic search + keyword)
+            table_objs = self._find_relevant_tables(question)
+            table_names = []
+            if table_objs:
+                # keep unique names in original order
+                seen = set()
+                for t in table_objs:
+                    name = t.get('table_name')
+                    if name and name not in seen:
+                        seen.add(name)
+                        table_names.append(name)
+
+            # If none found, attempt a looser semantic search on the schema collection
+            candidates = []
+            if not table_names:
+                try:
+                    sr = self.schema_collection.query(question, n_results=8)
+                    for meta in sr.get('metadatas', []):
+                        if isinstance(meta, dict) and meta.get('table'):
+                            candidates.append(meta.get('table'))
+                except Exception:
+                    pass
+
+                # If still none, we require clarification
+                if not candidates:
+                    return {'summary': '', 'tables': [], 'rules': [], 'clarify': True, 'candidates': []}
+
+                # Use the candidates as suggestions for clarification
+                return {'summary': '', 'tables': [], 'rules': [], 'clarify': True, 'candidates': candidates}
+
+            # Limit tables
+            table_names = table_names[:max_tables]
+
+            # 2) Get schema snippets for those tables (concise)
+            # Reuse get_schema_snippet_for_question but force selection of these names by building a small question
+            schema_snippet = []
+            for t in table_names:
+                info = self.schema_context.get_table_info(t)
+                if info:
+                    cols = [c.get('column_name') or c.get('Field') for c in info.get('columns', [])]
+                    rels = info.get('relationships', [])
+                    parts = [f"Table: {t}"]
+                    if cols:
+                        parts.append("Columns: " + ", ".join(cols[:20]))
+                    if rels:
+                        rel_lines = []
+                        for r in rels:
+                            if isinstance(r, dict):
+                                rel_lines.append(f"{r.get('column')} -> {r.get('referenced_table')}.{r.get('referenced_column')}")
+                        if rel_lines:
+                            parts.append("Relationships: " + "; ".join(rel_lines[:10]))
+                    schema_snippet.append("\n".join(parts))
+
+            # 3) Find relevant business rules filtered by these tables
+            rules_texts = []
+            try:
+                br = self.business_rules_collection.query(question, n_results=20)
+                # prefer rules whose metadata.table is in table_names
+                filtered = []
+                for doc, meta, dist in zip(br.get('documents', []), br.get('metadatas', []), br.get('distances', [])):
+                    m_table = None
+                    if isinstance(meta, dict):
+                        m_table = meta.get('table') or meta.get('tables')
+                    if m_table:
+                        if isinstance(m_table, list):
+                            intersects = any(x in table_names for x in m_table)
+                        else:
+                            intersects = m_table in table_names
+                        if intersects:
+                            filtered.append((doc, meta, dist))
+                # If none exactly matched, fall back to top results
+                chosen = filtered[:max_rules] if filtered else list(zip(br.get('documents', []), br.get('metadatas', []), br.get('distances', [])))[:max_rules]
+                for doc, meta, dist in chosen:
+                    rules_texts.append(doc)
+            except Exception:
+                pass
+
+            # 4) Summarize selected schema snippets and rules using LLM
+            all_texts = []
+            if schema_snippet:
+                all_texts.append("\n\n".join(schema_snippet))
+            if rules_texts:
+                all_texts.append("\n\nBusiness Rules:\n" + "\n".join(rules_texts))
+
+            summary = ''
+            if all_texts:
+                try:
+                    summarizer = LLMClient()
+                    prompt_parts = [
+                        "You are a concise summarizer. Given short database schema fragments and business rules, produce a compact summary suitable as context for an SQL-generation model.",
+                        "Output a bullet list with at most 2 short sentences per table and at most 1 short sentence per rule. Keep total output under 180 words.",
+                        "\n\nSchema fragments and rules:\n",
+                        "\n\n---\n\n".join(all_texts),
+                        "\n\nReturn only the compact summary without additional commentary."
+                    ]
+                    summ_prompt = "\n".join(prompt_parts)
+                    summary = summarizer.generate(summ_prompt) or ''
+                except Exception as e:
+                    logging.warning(f"Summarization failed: {e}")
+                    summary = "\n\n".join(all_texts)[:400]
+
+            return {
+                'summary': summary,
+                'tables': table_names,
+                'rules': rules_texts,
+                'clarify': False,
+                'candidates': []
+            }
+
+        except Exception as e:
+            logging.error(f"Error building compact context: {str(e)}")
+            return {'summary': '', 'tables': [], 'rules': [], 'clarify': True, 'candidates': []}
+
     def add_schema_knowledge(self, descriptions: List[Dict[str, str]]):
         """Add schema-related knowledge to the vector store.
         
@@ -560,12 +703,71 @@ class RAGManager:
 
                 # Business rule: describe columns, types, and sample values
                 br_lines = [f"Business Rule for table '{table}':"]
+
+                def detect_value_nature(val_str: str) -> str:
+                    """Return a short human-friendly descriptor for a sample value."""
+                    if val_str is None or val_str == 'None' or val_str == 'NULL' or val_str == '':
+                        return 'empty/null'
+                    s = str(val_str).strip()
+                    # common patterns
+                    import re
+                    # email
+                    if re.match(r"^[\w.\-+%]+@[\w.\-]+\.[A-Za-z]{2,}$", s):
+                        return 'email'
+                    # uuid
+                    if re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", s):
+                        return 'uuid'
+                    # iso date/time
+                    if re.match(r"^\d{4}-\d{2}-\d{2}(T|\s)?", s):
+                        return 'date/time'
+                    # numeric
+                    try:
+                        float(s)
+                        return 'numeric'
+                    except Exception:
+                        pass
+                    # url
+                    if s.startswith('http://') or s.startswith('https://'):
+                        return 'url'
+                    # phone-like
+                    if re.search(r"\d{7,}", s) and re.search(r"[0-9]", s):
+                        return 'phone/identifier'
+                    # boolean-like
+                    if s.lower() in ('true', 'false', '0', '1'):
+                        return 'boolean-like'
+                    # long text
+                    if len(s) > 200:
+                        return 'long text'
+                    # default: short text / categorical
+                    return 'text/categorical'
+
+                # If there were no sample rows, note the table is empty
+                table_has_rows = any(sample_values.get(col) for col in sample_values)
+                if not table_has_rows:
+                    br_lines.append("- Note: table appears to have no rows (no sample values available).")
+
                 for col, typ in col_types:
                     samples = sample_values.get(col, [])
-                    sample_str = f"; Sample values: {', '.join(samples)}" if samples else ""
-                    br_lines.append(f"- Column '{col}' (type: {typ}){sample_str}")
+                    nature = ''
+                    if samples and len(samples) > 0:
+                        # Describe nature based on first non-null sample and include up to 3 examples
+                        first = samples[0]
+                        try:
+                            nature = detect_value_nature(first)
+                        except Exception:
+                            nature = ''
+                    else:
+                        nature = 'no sample'
+
+                    sample_str = ''
+                    if samples:
+                        sample_str = f"; Sample values: {', '.join(samples)}"
+
+                    br_lines.append(f"- Column '{col}' (type: {typ}; nature: {nature}){sample_str}")
+
                 if rels:
                     br_lines.append("- Relationships: " + "; ".join(rels))
+
                 business_rule_descriptions.append({
                     'text': "\n".join(br_lines),
                     'metadata': {'table': table}

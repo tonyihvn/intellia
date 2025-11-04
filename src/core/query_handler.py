@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from ..llm.client import LLMClient
@@ -135,10 +136,38 @@ class QueryHandler:
                         'status': 'success'
                     })
                 except Exception as e:
+                    # If execution fails, attempt to be helpful instead of failing outright.
+                    # 1) Ask the LLM to analyze the SQL error (helpful diagnostics)
                     analysis = self.analyze_error(response['sql'], str(e))
+
+                    # 2) Try to fetch small sample rows from any referenced tables so we can
+                    #    provide the LLM with real data to base an explanation on.
+                    try:
+                        tables = self._extract_tables_from_sql(response['sql'])
+                        samples = self._fetch_table_samples(tables)
+                    except Exception:
+                        samples = {}
+
+                    # 3) Ask the LLM to produce a natural-language presentation using the
+                    #    original explanation and any sample rows we were able to fetch.
+                    try:
+                        present_prompt = (
+                            f"You attempted to run this SQL to answer the user's question:\n{question}\n\n"
+                            f"The SQL:\n{response['sql']}\n\n"
+                            f"Original LLM explanation:\n{response.get('explanation') or ''}\n\n"
+                            f"The SQL execution failed with error: {str(e)}\n\n"
+                            f"However, we were able to fetch these small sample rows from the referenced tables:\n{json.dumps(samples, default=str, indent=2)}\n\n"
+                            "Using ONLY the provided sample rows and the original explanation, produce a concise, honest natural-language answer to the user's question. If the sample rows are insufficient to answer confidently, say so and list what additional data or corrected SQL would be needed."
+                        )
+                        presentation = self.llm_client.generate(present_prompt)
+                    except Exception:
+                        presentation = None
+
                     result.update({
                         'status': 'error',
-                        'error_analysis': analysis
+                        'error_analysis': analysis,
+                        'sample_rows': samples,
+                        'presentation': presentation
                     })
 
             # Save to history
@@ -153,6 +182,74 @@ class QueryHandler:
 
         except Exception as e:
             raise Exception(f"Error handling query: {str(e)}")
+
+    def _extract_tables_from_sql(self, sql: str):
+        """Extract referenced table names from a SQL statement using simple heuristics.
+
+        Returns a list of unique table names.
+        """
+        try:
+            import re
+            tables = set()
+            # look for FROM or JOIN followed by `table` or table
+            for m in re.finditer(r"(?:from|join)\s+[`\"]?([A-Za-z0-9_]+)[`\"]?", sql, flags=re.I):
+                tables.add(m.group(1))
+            return list(tables)
+        except Exception:
+            return []
+
+    def _fetch_table_samples(self, tables, limit=5):
+        """Fetch up to `limit` sample rows from each table in `tables`.
+
+        Returns a dict table -> [rows]. Swallows errors for individual tables.
+        """
+        samples = {}
+        if not tables:
+            return samples
+        conn = None
+        try:
+            conn = get_db_connection()
+            if not conn:
+                return samples
+            cur = conn.cursor(dictionary=True)
+            for t in tables:
+                try:
+                    # Basic sanity for table name
+                    if not re.match(r'^[A-Za-z0-9_]+$', t):
+                        continue
+                    cur.execute(f"SELECT * FROM `{t}` LIMIT %s", (limit,))
+                    rows = cur.fetchall() or []
+                    # Serialize datetime/decimals similar to execute_sql
+                    ser = []
+                    for r in rows:
+                        srow = {}
+                        for k, v in r.items():
+                            try:
+                                if hasattr(v, 'isoformat'):
+                                    srow[k] = v.isoformat()
+                                elif hasattr(v, 'normalize'):
+                                    srow[k] = str(v)
+                                else:
+                                    srow[k] = v
+                            except Exception:
+                                srow[k] = str(v)
+                        ser.append(srow)
+                    samples[t] = ser
+                except Exception:
+                    samples[t] = []
+            try:
+                cur.close()
+            except Exception:
+                pass
+            return samples
+        except Exception:
+            return samples
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def generate_sql(self, question):
         """
@@ -526,6 +623,25 @@ Requirements:
             found_tables = set()
             for m in re.finditer(r"(?:from|join)\s+[`']?([a-zA-Z0-9_]+)[`']?", sql, flags=re.I):
                 found_tables.add(m.group(1).lower())
+
+            # Heuristic filter: sometimes the LLM or users include unquoted tokens or
+            # the regex can pick up values that are actually string literals (e.g.
+            # WHERE state = 'NASARAWA'). If a found token appears only inside
+            # quoted literals in the SQL, ignore it as a referenced table.
+            filtered_found = set()
+            for t in found_tables:
+                # look for the token appearing inside single or double quotes
+                # as a standalone literal (case-insensitive)
+                try:
+                    if re.search(r"(?i)['\"]\s*" + re.escape(t) + r"\s*['\"]", sql):
+                        # token appears as a quoted literal somewhere -> skip
+                        continue
+                except Exception:
+                    # on any regex error, fall back to keeping the token
+                    pass
+                filtered_found.add(t)
+
+            found_tables = filtered_found
 
             missing_tables = [t for t in found_tables if t not in tables and t not in aliases and t not in stopwords]
 

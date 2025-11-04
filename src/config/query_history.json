@@ -1,12 +1,63 @@
 [
   {
-    "id": "a3dc03c5-21aa-4d26-98c3-a3f02d65d608",
-    "timestamp": "2025-11-04T16:07:21.035936",
-    "command": "Show me a tabular record of all the men who are New Members and belong to a ministry",
+    "id": "c81e26fe-320e-4c82-acbf-db41790254f9",
+    "timestamp": "2025-11-04T23:28:03.699836",
+    "command": "Display the sum total of laptops in each state; Nasarawa and FCT display the result in tabular format. Use a Pie Chart to visualize their differences",
     "type": "query_preview",
-    "sql": "SELECT\n  id,\n  name,\n  gender,\n  dob,\n  age_group,\n  phone_number,\n  email,\n  about,\n  address,\n  location,\n  house_fellowship,\n  invited_by,\n  assigned_to,\n  ministry,\n  status,\n  email_verified_at,\n  role,\n  settings_id,\n  remember_token\nFROM users\nWHERE\n  gender = 'Male' AND status = 'New Member' AND ministry IS NOT NULL;\n-- This SQL query selects all columns from the 'users' table for men who are 'New Member' and belong to a ministry (ministry is not NULL).",
-    "explanation": "```sql\n\n```",
-    "status": "preview",
-    "error": null
+    "sql": "SELECT state, COUNT(*) AS TotalLaptops\nFROM concurrencies\nWHERE state IN ('NASARAWA', 'FCT')\n  AND category = 'Laptops'\nGROUP BY state;\n\n\nExplanation:\nThe query counts the total number of laptops in the `concurrencies` table for each state (NASARAWA and FCT). The result is grouped by state and aliased as `TotalLaptops` to display the result in a tabular format.",
+    "explanation": "```sql\nSELECT state, COUNT(*) AS TotalLaptops\nFROM concurrencies\nWHERE state IN ('NASARAWA', 'FCT')\n  AND category = 'Laptops'\nGROUP BY state;\n```\n\nExplanation:\nThe query counts the total number of laptops in the `concurrencies` table for each state (NASARAWA and FCT). The result is grouped by state and aliased as `TotalLaptops` to display the result in a tabular format.",
+    "status": "success",
+    "error": null,
+    "result": {
+      "type": "sql_executed",
+      "results": [
+        {
+          "state": "FCT",
+          "TotalLaptops": 283
+        },
+        {
+          "state": "NASARAWA",
+          "TotalLaptops": 108
+        }
+      ],
+      "formatted": {
+        "format": "tabular",
+        "content_type": "text/html",
+        "content": "<table><thead><tr><th>state</th><th>TotalLaptops</th></tr></thead><tbody><tr><td>FCT</td><td>283</td></tr><tr><td>NASARAWA</td><td>108</td></tr></tbody></table>"
+      }
+    }
+  },
+  {
+    "id": "5d2cb8de-2176-45ed-b127-c1966f69b309",
+    "timestamp": "2025-11-04T23:22:33.069372",
+    "command": "Count total of laptops in the system from Nasarawa State display the result in tabular format",
+    "type": "query_preview",
+    "sql": "SELECT COUNT(*) AS TotalLaptops\nFROM inventories\nWHERE state = 'NASARAWA' AND category = 'Laptops';\n\n\nExplanation:\nThe query counts the total number of laptops in the `inventories` table where the `state` is 'NASARAWA' and the `category` is 'Laptops'. The result is aliased as `TotalLaptops` to display the result in a tabular format.",
+    "explanation": "```sql\nSELECT COUNT(*) AS TotalLaptops\nFROM inventories\nWHERE state = 'NASARAWA' AND category = 'Laptops';\n```\n\nExplanation:\nThe query counts the total number of laptops in the `inventories` table where the `state` is 'NASARAWA' and the `category` is 'Laptops'. The result is aliased as `TotalLaptops` to display the result in a tabular format.",
+    "status": "success",
+    "error": null,
+    "result": {
+      "type": "sql_executed",
+      "results": [
+        {
+          "TotalLaptops": 108
+        }
+      ],
+      "formatted": {
+        "format": "tabular",
+        "content_type": "text/html",
+        "content": "<table><thead><tr><th>TotalLaptops</th></tr></thead><tbody><tr><td>108</td></tr></tbody></table>"
+      }
+    }
+  },
+  {
+    "id": "bc123732-32b8-4613-92a3-a591142e274a",
+    "timestamp": "2025-11-04T23:14:05.736465",
+    "command": "Count total of laptops in the system from Nasarawa State",
+    "type": "query_preview",
+    "sql": null,
+    "explanation": "```sql\nSELECT COUNT(*)\nFROM inventories\nWHERE state = 'NASARAWA'\n  AND category = 'Laptops';\n```\n\nExplanation:\nThe query counts the total number of laptops in the `inventories` table where the `state` is 'NASARAWA' and the `category` is 'Laptops'. This directly addresses the user's request to count laptops from Nasarawa State.",
+    "status": "error",
+    "error": "SQL validation failed: {'ok': False, 'found': ['nasarawa', 'inventories'], 'tables': ['audits', 'categories', 'concurrencies', 'dcdistributions', 'dcstocks', 'dcsupplies', 'dctools', 'dctoolutilizations', 'departments', 'facilities', 'failed_jobs', 'files', 'inventories', 'inventoryspecs', 'items', 'migrations', 'movements', 'multifacilities', 'password_resets', 'purchases', 'requests', 'settings', 'stocks', 'suppliers', 'supplies', 'units', 'users'], 'missing_tables': ['nasarawa']}"
   }
 ]

@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from ..rag.manager import RAGManager
 from ..config import Config
+from ..db.connection import get_db_connection
 
 rag_routes = Blueprint('rag', __name__)
 rag_manager = RAGManager()
@@ -198,3 +199,42 @@ def get_all_knowledge():
     """Endpoint to get all stored knowledge."""
     knowledge = rag_manager.get_all_knowledge()
     return jsonify(knowledge)
+
+
+@rag_routes.route('/api/rag/clarify', methods=['POST'])
+def clarify_selection():
+    """Accept clarifier selections from the UI and return a compact context summary.
+
+    Expected JSON: { question: str, selected_tables: [str] }
+    Returns: same shape as RAGManager.get_compact_context
+    """
+    if not request.is_json:
+        return jsonify({'error': 'Request must be JSON'}), 415
+
+    data = request.get_json()
+    question = data.get('question') or ''
+    selected = data.get('selected_tables') or []
+
+    # Try to set DB context so schema snippets are available
+    try:
+        conn = get_db_connection()
+        if conn:
+            try:
+                rag_manager.set_db_context(conn)
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    except Exception:
+        # proceed even if DB context couldn't be set
+        pass
+
+    # If user selected tables, bias the question to include them so get_compact_context will use them
+    if selected and isinstance(selected, (list, tuple)):
+        augmented = f"{question}. Use tables: {', '.join(selected)}"
+    else:
+        augmented = question
+
+    compact = rag_manager.get_compact_context(augmented)
+    return jsonify(compact)

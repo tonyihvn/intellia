@@ -530,7 +530,9 @@ def handle_query():
 
         # Include optional conversation history passed from client to provide context
         conversation = data.get('conversation') if isinstance(data, dict) else None
-        result = command_handler.handle_command(command, conversation=conversation)
+        # Allow the client to pass back clarifier selections via 'selected_tables'
+        selected_tables = data.get('selected_tables') if isinstance(data, dict) else None
+        result = command_handler.handle_command(command, conversation=conversation, selected_tables=selected_tables)
 
         # Determine status for history: previews are stored as 'preview'
         status = 'error' if result.get('error') else ('preview' if result.get('type') in ('query_preview', 'action_preview') else 'success')
@@ -969,6 +971,73 @@ def table_rows(table_name):
                 pass
     except Exception as e:
         logging.error(f"Error fetching rows for {table_name}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@main_routes.route('/db/table/<string:table_name>/lookup', methods=['GET'])
+def table_lookup(table_name):
+    """Lookup display values for a set of primary keys in another table.
+    Query params:
+      pk - primary key column name in referenced table (required)
+      ids - comma-separated ids to lookup (required)
+      display - optional display column to return (defaults to pk)
+    Returns: { mappings: { id: display_value, ... } }
+    """
+    try:
+        pk = request.args.get('pk')
+        ids_param = request.args.get('ids')
+        display = request.args.get('display')
+        if not pk or not ids_param:
+            return jsonify({'error': 'pk and ids are required'}), 400
+
+        ids = [i for i in [s.strip() for s in ids_param.split(',')] if i != '']
+        if not ids:
+            return jsonify({'mappings': {}})
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'error': 'No DB connection'}), 500
+        try:
+            # sanitize identifiers (very lightly) - ensure alphanum + underscore
+            if not re.match(r'^[A-Za-z0-9_]+$', pk):
+                return jsonify({'error': 'Invalid pk name'}), 400
+            if not re.match(r'^[A-Za-z0-9_]+$', table_name):
+                return jsonify({'error': 'Invalid table name'}), 400
+            display_col = display if display and re.match(r'^[A-Za-z0-9_]+$', display) else pk
+
+            # Build parameterized IN clause - use placeholders
+            placeholders = ','.join(['%s'] * len(ids))
+            cur = conn.cursor()
+            try:
+                sql = f"SELECT `{pk}`, `{display_col}` FROM `{table_name}` WHERE `{pk}` IN ({placeholders})"
+                cur.execute(sql, tuple(ids))
+                rows = cur.fetchall() or []
+            finally:
+                cur.close()
+
+            mappings = {}
+            for r in rows:
+                try:
+                    k = r[0]
+                    v = r[1]
+                    # ensure serializable
+                    if isinstance(v, (bytes, bytearray, memoryview)):
+                        try:
+                            v = v.decode('utf-8', errors='ignore')
+                        except Exception:
+                            v = str(v)
+                    mappings[str(k)] = v
+                except Exception:
+                    continue
+
+            return jsonify({'mappings': mappings})
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        logging.error(f"Error in lookup for {table_name}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @main_routes.route('/query/preview', methods=['POST'])

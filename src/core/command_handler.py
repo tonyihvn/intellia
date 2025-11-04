@@ -35,7 +35,7 @@ class CommandHandler:
                 self.query_handler = QueryHandler(self.llm_client, None)
         self.scheduler = get_scheduler()
 
-    def handle_command(self, command_text: str, execute: bool = False, conversation: list = None):
+    def handle_command(self, command_text: str, execute: bool = False, conversation: list = None, selected_tables: list = None):
         """
         Process a command which could be a query or an action.
 
@@ -416,7 +416,17 @@ class CommandHandler:
                     enhanced_ctx = None
                     if enhancer:
                         try:
-                            enhanced = enhancer.enhance_query_context(command_text)
+                            # Pass through any selected_tables if provided (from clarifier UI)
+                            enhanced = enhancer.enhance_query_context(command_text, selected_tables=selected_tables)
+                            # If enhancer requests clarification, return a structured clarify response
+                            if isinstance(enhanced, dict) and enhanced.get('clarify'):
+                                return {
+                                    'type': 'clarify',
+                                    'prompt': enhanced.get('enhanced_prompt'),
+                                    'candidates': enhanced.get('candidates', []),
+                                    'sql': None,
+                                    'needs_confirmation': False
+                                }
                             enhanced_ctx = enhanced.get('enhanced_prompt')
                         except Exception:
                             enhanced_ctx = None
@@ -514,21 +524,62 @@ class CommandHandler:
 
             # execute True => actually run the query
             result = self.query_handler.handle_query(command_text, execute=True)
-            return {
+            # Build a response that includes executed results or a presentation generated from sample rows
+            resp = {
                 'type': 'query_result',
                 'sql': result.get('sql'),
                 'results': result.get('results'),
                 'explanation': result.get('explanation')
             }
+            # Include presentation synthesized by the LLM when execution failed but a presentation exists
+            if result.get('presentation'):
+                resp['presentation'] = result.get('presentation')
+            if result.get('sample_rows'):
+                resp['sample_rows'] = result.get('sample_rows')
+            if result.get('error_analysis'):
+                resp['error_analysis'] = result.get('error_analysis')
+            return resp
 
         except Exception as e:
             logger.error(f"Failed to handle query/command: {str(e)}")
             return {'type': 'error', 'error': str(e)}
 
-    def _execute_action_with_optional_sql(self, command_text, action, sql=None):
+    def _execute_action_with_optional_sql(self, command_text, action, sql=None, conversation=None, result_data=None):
         """Execute the given action. If `sql` is provided, it will be executed to produce data
         that can be embedded into the action (for example, a report used in an email body)."""
         try:
+            # --- Business Rule Summarization Helper ---
+            def summarize_and_store_business_rule():
+                try:
+                    rag = RAGManager()
+                    # Compose a summary from the conversation, command, and result
+                    summary_parts = []
+                    if conversation and isinstance(conversation, list):
+                        summary_parts.append("Conversation:\n" + "\n".join([
+                            f"{(m.get('role') or 'user').capitalize()}: {m.get('text') or ''}" if isinstance(m, dict) else str(m)
+                            for m in conversation[-10:]
+                        ]))
+                    summary_parts.append(f"Command: {command_text}")
+                    if action:
+                        summary_parts.append(f"Action: {json.dumps(action, default=str)[:500]}")
+                    if result_data:
+                        # Try to summarize the structure/nature of the result
+                        if isinstance(result_data, dict) and 'results' in result_data and isinstance(result_data['results'], list):
+                            rows = result_data['results']
+                            if rows:
+                                keys = list(rows[0].keys()) if isinstance(rows[0], dict) else []
+                                summary_parts.append(f"Result columns: {keys}")
+                                summary_parts.append(f"Sample row: {rows[0]}")
+                                summary_parts.append(f"Rows returned: {len(rows)}")
+                        elif isinstance(result_data, dict):
+                            summary_parts.append(f"Result: {json.dumps(result_data, default=str)[:300]}")
+                        else:
+                            summary_parts.append(f"Result: {str(result_data)[:300]}")
+                    # Compose the business rule text
+                    rule_text = "\n".join(summary_parts)
+                    rag.add_business_rule([{'text': rule_text, 'metadata': {'source': 'conversation', 'timestamp': str(uuid.uuid1())}}])
+                except Exception as e:
+                    logger.warning(f"Failed to summarize/store business rule: {e}")
             data_for_action = None
             # validate SQL against schema before executing to avoid accidental DDL/unknown-table errors
             if sql:
@@ -560,6 +611,7 @@ class CommandHandler:
                     else:
                         recipients = [recipients]
 
+            result_payload = None
             if action.get('type') == 'send_email':
                 subject = action.get('parameters', {}).get('subject') or action.get('subject') or 'No Subject'
                 body = action.get('parameters', {}).get('body') or action.get('body') or ''
@@ -595,7 +647,7 @@ class CommandHandler:
 
                 try:
                     send_email(subject=subject, body=body, to=recipients or [], cc=action.get('cc', []))
-                    return {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}'}
+                    result_payload = {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}'}
                 except Exception as e:
                     # fallback: try invoking the CLI script (scripts/send_email.py) as a subprocess
                     try:
@@ -614,11 +666,13 @@ class CommandHandler:
                         ], input=json.dumps(payload), text=True, capture_output=True, timeout=120)
                         out = proc.stdout.strip()
                         if proc.returncode == 0:
-                            return {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}', 'cli_output': out}
+                            result_payload = {'type': 'action_completed', 'action': 'send_email', 'message': f'Email sent to {recipients}', 'cli_output': out}
                         else:
-                            return {'type': 'action_failed', 'error': f'CLI fallback failed: {proc.stderr or out}'}
+                            result_payload = {'type': 'action_failed', 'error': f'CLI fallback failed: {proc.stderr or out}'}
                     except Exception as e2:
-                        return {'type': 'action_failed', 'error': f'Failed to send email: {e} ; fallback error: {e2}'}
+                        result_payload = {'type': 'action_failed', 'error': f'Failed to send email: {e} ; fallback error: {e2}'}
+                summarize_and_store_business_rule()
+                return result_payload
 
             elif action.get('type') == 'call_api':
                 result = call_api(
@@ -627,13 +681,19 @@ class CommandHandler:
                     headers=action.get('parameters', {}).get('headers', action.get('headers')),
                     json_body=action.get('parameters', {}).get('body', action.get('body'))
                 )
+                summarize_and_store_business_rule()
                 return {'type': 'action_completed', 'action': 'call_api', 'response': result}
 
             else:
+                summarize_and_store_business_rule()
                 return {'type': 'action_failed', 'error': 'Unsupported action type'}
 
         except Exception as e:
             logger.error(f"Failed to execute action: {e}")
+            try:
+                summarize_and_store_business_rule()
+            except Exception:
+                pass
             return {'type': 'action_failed', 'error': str(e)}
 
     def _lookup_email_for_patient(self, patient_id):

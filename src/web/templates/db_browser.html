@@ -29,6 +29,22 @@
     .mono {
         font-family: monospace;
     }
+
+    /* Ensure rendered HTML in cells preserves line breaks and doesn't overflow */
+    td,
+    .result-item {
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    td pre,
+    td code {
+        white-space: pre-wrap;
+        background: #efefef;
+        padding: 0.35rem 0.5rem;
+        border-radius: 4px;
+        display: block;
+    }
 </style>
 {% endblock %}
 
@@ -118,6 +134,8 @@
     let currentPage = 1;
     let pageSize = 25;
     let lastTotal = 0;
+    // Map of foreign-key column -> { referenced_table, referenced_column, display_column }
+    let relationshipsMap = {};
 
     async function loadTables() {
         const container = document.getElementById('tablesList');
@@ -191,6 +209,35 @@
                 el.textContent = r.COLUMN_NAME + ' → ' + r.REFERENCED_TABLE_NAME + '.' + r.REFERENCED_COLUMN_NAME;
                 relDiv.appendChild(el);
             });
+            // Build relationshipsMap for quick client-side lookups
+            relationshipsMap = {};
+            try {
+                // For each fk, attempt to choose a friendly display column from the referenced table
+                await Promise.all((rel || []).map(async (r) => {
+                    try {
+                        const fkCol = r.COLUMN_NAME;
+                        const refTable = r.REFERENCED_TABLE_NAME;
+                        const refCol = r.REFERENCED_COLUMN_NAME;
+                        // Fetch referenced table meta to choose display column heuristically
+                        const refMeta = await fetchJson('/api/db/table/' + encodeURIComponent(refTable) + '/meta');
+                        const refCols = (refMeta.columns || []).map(c => (c.Field || c.field || c.COLUMN_NAME || Object.values(c)[0]));
+                        // preferred display names
+                        const preferred = ['name', 'full_name', 'title', 'username', 'email', 'label'];
+                        let displayCol = refCols.find(c => c && preferred.includes(String(c).toLowerCase()));
+                        if (!displayCol) {
+                            // fallback to first text-like column
+                            displayCol = refCols.find(c => c && /char|text|name|title/i.test(String(c)));
+                        }
+                        if (!displayCol) displayCol = refCol;
+                        relationshipsMap[fkCol] = { referenced_table: refTable, referenced_column: refCol, display_column: displayCol };
+                    } catch (e) {
+                        // ignore per-FK failures
+                        console.warn('FK display column choose error', e);
+                    }
+                }));
+            } catch (e) {
+                console.warn('relationshipsMap build failed', e);
+            }
             // Brief
             const brief = meta.brief || '';
             document.getElementById('tableBrief').textContent = brief;
@@ -225,36 +272,9 @@
                 document.getElementById('pager').innerHTML = '';
                 return;
             }
-            // Build DOM table and initialize DataTable for search/filter/paging/export
-            const cols = Object.keys(rows[0]);
+            // Render table using helper which supports relationship lookups and HTML sanitization
             rowsContainer.innerHTML = '';
-            const wrapper = document.createElement('div');
-            wrapper.className = 'table-responsive';
-            const tbl = document.createElement('table');
-            tbl.className = 'table table-sm table-bordered generated-datatable';
-            const thead = document.createElement('thead');
-            // Header row (column titles)
-            const trHead = document.createElement('tr');
-            cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; trHead.appendChild(th); });
-            thead.appendChild(trHead);
-            // Filter row (inputs) - follow DataTables multi-filter example
-            const trFilter = document.createElement('tr');
-            cols.forEach(c => {
-                const th = document.createElement('th');
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'column-filter form-control form-control-sm';
-                input.placeholder = 'Filter';
-                th.appendChild(input);
-                trFilter.appendChild(th);
-            });
-            thead.appendChild(trFilter);
-            tbl.appendChild(thead);
-            const tbody = document.createElement('tbody');
-            rows.forEach(r => { const tr = document.createElement('tr'); cols.forEach(c => { const td = document.createElement('td'); td.textContent = (r[c] === null || r[c] === undefined) ? '' : String(r[c]); tr.appendChild(td); }); tbody.appendChild(tr); });
-            tbl.appendChild(tbody);
-            wrapper.appendChild(tbl);
-            rowsContainer.appendChild(wrapper);
+            await renderTabularData(rows, rowsContainer);
             // initialize DataTable
             try {
                 if (window.jQuery && $.fn && $.fn.dataTable) {
@@ -326,6 +346,187 @@
         }
     }
 
+    // Helper: sanitize HTML-like strings and present them as safe HTML (allowing a small whitelist)
+    function sanitizeAndFormat(raw) {
+        if (raw === null || raw === undefined) return '';
+        let s = String(raw);
+        // If object shaped from binary marker, show placeholder
+        try {
+            const parsed = JSON.parse(s);
+            if (parsed && parsed.__b64__ && parsed.data) {
+                return '<em>(binary data)</em>';
+            }
+        } catch (e) {
+            // not JSON, continue
+        }
+
+        const allowedTags = new Set(['b', 'i', 'strong', 'em', 'p', 'ul', 'ol', 'li', 'br', 'a', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5']);
+
+        function sanitizeHtml(input) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(input, 'text/html');
+
+            function walk(node) {
+                if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent);
+                if (node.nodeType !== Node.ELEMENT_NODE) return document.createDocumentFragment();
+                const tag = node.tagName.toLowerCase();
+                if (!allowedTags.has(tag)) {
+                    const frag = document.createDocumentFragment();
+                    node.childNodes.forEach(child => frag.appendChild(walk(child)));
+                    return frag;
+                }
+                const el = document.createElement(tag);
+                if (tag === 'a') {
+                    const href = node.getAttribute('href');
+                    if (href && /^(https?:\/\/|mailto:|\/)/i.test(href)) {
+                        el.setAttribute('href', href);
+                        el.setAttribute('target', '_blank');
+                        el.setAttribute('rel', 'noopener noreferrer');
+                    }
+                }
+                node.childNodes.forEach(child => el.appendChild(walk(child)));
+                return el;
+            }
+
+            const container = document.createElement('div');
+            doc.body.childNodes.forEach(child => container.appendChild(walk(child)));
+            return container.innerHTML;
+        }
+
+        // If the string contains tags, sanitize and return
+        if (/<[^>]+>/.test(s)) {
+            return sanitizeHtml(s);
+        }
+
+        // Otherwise fallback to previous plain-text formatting: escape and paragraphize
+        function escapeHtmlLocal(x) {
+            return String(x)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        const norm = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+        if (!norm) return '';
+        const paras = norm.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+        return paras.map(p => `<p>${escapeHtmlLocal(p).replace(/\n/g, '<br>')}</p>`).join('');
+    }
+
+    // Fetch mappings for a single FK column (returns mapping object id->display)
+    async function fetchFkMappingForColumn(fkInfo, ids) {
+        if (!ids || ids.length === 0) return {};
+        try {
+            const url = `/api/db/table/${encodeURIComponent(fkInfo.referenced_table)}/lookup?pk=${encodeURIComponent(fkInfo.referenced_column)}&ids=${encodeURIComponent(ids.join(','))}&display=${encodeURIComponent(fkInfo.display_column)}`;
+            const resp = await fetchJson(url);
+            return resp.mappings || {};
+        } catch (e) {
+            console.warn('FK lookup failed', e);
+            return {};
+        }
+    }
+
+    // Render tabular data into the given container. Supports FK resolution via relationshipsMap.
+    async function renderTabularData(rows, container) {
+        if (!rows || rows.length === 0) {
+            container.innerHTML = '<div class="text-muted">No rows to display.</div>';
+            return;
+        }
+        const cols = Object.keys(rows[0]);
+
+        // For each FK column present, collect ids to lookup
+        const fkLookups = {};
+        Object.keys(relationshipsMap || {}).forEach(col => {
+            if (!cols.includes(col)) return;
+            fkLookups[col] = new Set();
+        });
+        rows.forEach(r => {
+            Object.keys(fkLookups).forEach(col => {
+                const v = r[col];
+                if (v === null || v === undefined) return;
+                fkLookups[col].add(String(v));
+            });
+        });
+
+        // Fetch mappings for each fk column
+        const fkMappings = {};
+        await Promise.all(Object.keys(fkLookups).map(async col => {
+            const ids = Array.from(fkLookups[col]);
+            const fkInfo = relationshipsMap[col];
+            if (!fkInfo || ids.length === 0) { fkMappings[col] = {}; return; }
+            fkMappings[col] = await fetchFkMappingForColumn(fkInfo, ids);
+        }));
+
+        // Build DOM table
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-responsive';
+        const tbl = document.createElement('table');
+        tbl.className = 'table table-sm table-bordered generated-datatable';
+        const thead = document.createElement('thead');
+        const trHead = document.createElement('tr');
+        cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; trHead.appendChild(th); });
+        thead.appendChild(trHead);
+        const trFilter = document.createElement('tr');
+        cols.forEach(c => { const th = document.createElement('th'); const input = document.createElement('input'); input.type = 'text'; input.className = 'column-filter form-control form-control-sm'; input.placeholder = 'Filter'; th.appendChild(input); trFilter.appendChild(th); });
+        thead.appendChild(trFilter);
+        tbl.appendChild(thead);
+        const tbody = document.createElement('tbody');
+
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            cols.forEach(c => {
+                const td = document.createElement('td');
+                const raw = r[c];
+                // Resolve FK if mapping present
+                if (fkMappings[c] && raw !== null && raw !== undefined) {
+                    const mapped = fkMappings[c][String(raw)];
+                    if (mapped !== undefined && mapped !== null) {
+                        td.innerHTML = escapeHtml(String(mapped));
+                        tr.appendChild(td);
+                        return;
+                    }
+                }
+                // Handle binary marker objects
+                if (raw && typeof raw === 'object' && raw.__b64__ && raw.data) {
+                    td.innerHTML = '<em>(binary data)</em>';
+                    tr.appendChild(td);
+                    return;
+                }
+                // Strings containing HTML tags - sanitize & format
+                if (typeof raw === 'string' && /<[^>]+>/.test(raw)) {
+                    td.innerHTML = sanitizeAndFormat(raw);
+                    tr.appendChild(td);
+                    return;
+                }
+                // Long text: format into paragraphs
+                if (typeof raw === 'string' && raw.length > 120) {
+                    td.innerHTML = sanitizeAndFormat(raw);
+                    tr.appendChild(td);
+                    return;
+                }
+                // Default fallback
+                td.textContent = (raw === null || raw === undefined) ? '' : String(raw);
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+
+        tbl.appendChild(tbody);
+        wrapper.appendChild(tbl);
+        container.appendChild(wrapper);
+
+        // Initialize DataTable if available
+        try {
+            if (window.jQuery && $.fn && $.fn.dataTable) {
+                if ($.fn.dataTable.isDataTable(tbl)) {
+                    try { $(tbl).DataTable().clear().rows.add(rows).draw(); } catch (e) { $(tbl).DataTable().destroy(); }
+                }
+                $(tbl).DataTable({ paging: false, lengthChange: false, searching: true, ordering: true, dom: 'Bfrtip', buttons: [{ extend: 'excelHtml5', text: 'Export to Excel' }], keys: true, orderCellsTop: true, initComplete: function () { var api = this.api(); api.columns().every(function (colIdx) { var column = this; var input = $(api.table().header()).find('tr:eq(1) th').eq(colIdx).find('input'); $(input).on('keyup change clear', function () { var val = this.value; if (column.search() !== val) { column.search(val).draw(); } }); }); } });
+            }
+        } catch (e) { console.warn('DataTable init failed in renderTabularData', e); }
+    }
+
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         if (currentTable) {
             await loadTableMeta();
@@ -350,29 +551,13 @@
             // render results in main rows container
             const rowsContainer = document.getElementById('rowsContainer');
             if (Array.isArray(data) && data.length > 0) {
-                // reuse loadRows rendering logic by building a fake payload
-                const fake = { rows: data.slice(0, pageSize), total: data.length };
-                // temporarily set currentTable to reflect custom query
-                rowsContainer.innerHTML = '';
-                // call loadRows UI-less path: render table directly
+                // Render query results using the same tabular renderer (supports FK resolution & formatting)
                 try {
-                    const cols = Object.keys(fake.rows[0]);
-                    const wrapper = document.createElement('div');
-                    wrapper.className = 'table-responsive';
-                    const tbl = document.createElement('table');
-                    tbl.className = 'table table-sm table-bordered generated-datatable';
-                    const thead = document.createElement('thead');
-                    const trHead = document.createElement('tr');
-                    cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; trHead.appendChild(th); });
-                    thead.appendChild(trHead);
-                    tbl.appendChild(thead);
-                    const tbody = document.createElement('tbody');
-                    fake.rows.forEach(r => { const tr = document.createElement('tr'); cols.forEach(c => { const td = document.createElement('td'); td.textContent = (r[c] === null || r[c] === undefined) ? '' : String(r[c]); tr.appendChild(td); }); tbody.appendChild(tr); });
-                    tbl.appendChild(tbody);
-                    wrapper.appendChild(tbl);
-                    rowsContainer.appendChild(wrapper);
-                    try { $(tbl).DataTable({ paging: false, lengthChange: false, dom: 'Bfrtip', buttons: [{ extend: 'excelHtml5', text: 'Export to Excel' }], orderCellsTop: true }); } catch (e) { }
-                } catch (e) { rowsContainer.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>'; }
+                    await renderTabularData(data.slice(0, pageSize), rowsContainer);
+                } catch (e) {
+                    console.warn('renderTabularData failed for quick SQL', e);
+                    rowsContainer.innerHTML = '<pre>' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>';
+                }
             } else if (data && data.results) {
                 // if response is shaped { results: [...] }
                 const rows = data.results;
