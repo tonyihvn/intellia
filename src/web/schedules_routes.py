@@ -1,6 +1,7 @@
 import json
 import logging
 from flask import Blueprint, request, jsonify
+from ..config import Config
 from ..llm.client import LLMClient
 from ..scheduler.scheduler import get_scheduler
 from ..scheduler import parser as nlparser
@@ -56,7 +57,8 @@ def parse_schedule():
         return jsonify({'job_spec': job_spec})
     except Exception as e:
         logger.error(f"Failed to parse schedule with LLM: {e}")
-        return jsonify({"error": str(e)}), 500
+        payload = Config.client_error_payload(str(e), e)
+        return jsonify(payload), 500
 
 @schedules_routes.route('/schedules', methods=['POST'])
 def create_schedule():
@@ -88,7 +90,8 @@ def create_schedule():
         return jsonify({'success': True, 'job_id': job_id})
     except Exception as e:
         logger.error(f"Failed to create schedule: {e}")
-        return jsonify({'error': str(e)}), 500
+        payload = Config.client_error_payload(str(e), e)
+        return jsonify(payload), 500
 
 @schedules_routes.route('/schedules', methods=['GET'])
 def list_schedules():

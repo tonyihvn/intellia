@@ -3,6 +3,8 @@ from .manager import RAGManager
 import json
 import os
 from ..config import Config
+from ..llm.client import LLMClient
+import json
 
 class QueryEnhancer:
     def __init__(self, rag_manager: RAGManager):
@@ -87,3 +89,53 @@ Instructions for the assistant:
 """
 
         return {'enhanced_prompt': enhanced_prompt, 'relevant_info': []}
+
+    def detect_intent(self, question: str, conv_prefix: str = '') -> dict:
+        """Use the enhancer + a lightweight LLM prompt to rapidly classify intent.
+
+        Returns a dict with keys:
+          - intent: one of ('send_email','sql','call_api','add_source','text','schedule','unknown')
+          - display: optional display hint ('table','chart','csv','analysis','pdf','excel',...)
+          - explain: short explanation of the decision
+          - suggested_sql: optional SQL string or None
+        """
+        try:
+            llm = LLMClient()
+            prompt = f"""
+Classify the user's instruction into one of these intents: send_email, sql, call_api, add_source, schedule, text.
+Also, if the user clearly requested a particular output presentation, include a display hint (table, chart, csv, analysis, pdf, excel) in the response.
+
+Return ONLY a JSON object with keys: intent, display, explain, suggested_sql (suggested_sql may be null).
+
+User instruction: {question}
+
+If intent is 'sql' and you can produce an immediate suggested SQL, include it in suggested_sql; otherwise set it to null.
+"""
+            out = llm.generate(prompt)
+            txt = out if isinstance(out, str) else str(out)
+            # extract JSON substring
+            s = txt.find('{')
+            e = txt.rfind('}')
+            if s != -1 and e != -1:
+                try:
+                    payload = json.loads(txt[s:e+1])
+                    # normalize keys
+                    return {
+                        'intent': (payload.get('intent') or payload.get('label') or 'unknown').lower(),
+                        'display': (payload.get('display') or payload.get('presentation') or None),
+                        'explain': payload.get('explain') or payload.get('reason') or '',
+                        'suggested_sql': payload.get('suggested_sql') or payload.get('sql') or None
+                    }
+                except Exception:
+                    pass
+            # fallback: attempt simple heuristics
+            low = (question or '').lower()
+            if 'send' in low and 'email' in low:
+                return {'intent': 'send_email', 'display': None, 'explain': 'heuristic: contains "send" and "email"', 'suggested_sql': None}
+            if 'call api' in low or 'call the api' in low or low.startswith('call api'):
+                return {'intent': 'call_api', 'display': None, 'explain': 'heuristic: contains "call api"', 'suggested_sql': None}
+            if 'select' in low or 'find' in low or 'show' in low or 'how many' in low or 'list' in low:
+                return {'intent': 'sql', 'display': None, 'explain': 'heuristic: likely a SQL/lookup request', 'suggested_sql': None}
+            return {'intent': 'unknown', 'display': None, 'explain': 'fallback: unable to classify', 'suggested_sql': None}
+        except Exception:
+            return {'intent': 'unknown', 'display': None, 'explain': 'error during detection', 'suggested_sql': None}

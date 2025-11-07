@@ -258,6 +258,42 @@
             const providerNames = Object.keys(providers).sort((a, b) => (providers[a].priority || 99) - (providers[b].priority || 99));
             list.innerHTML = providerNames.map(name => {
                 const p = providers[name];
+                // If this provider includes local models metadata, render a richer UI
+                if (p.models && Array.isArray(p.models)) {
+                    const modelsHtml = p.models.map(m => `
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" disabled ${m.installed ? 'checked' : ''}>
+                            <label class="form-check-label">${m.name} ${m.installed ? '<small class="text-muted">(installed)</small>' : '<small class="text-muted">(not installed)</small>'}</label>
+                        </div>`).join('');
+
+                    const priorityVal = (p.models_priority && p.models_priority.length) ? p.models_priority.join(',') : '';
+                    return `
+                        <div class="border rounded p-3 mb-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <strong>${name}</strong>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="prov-${name}-enabled" ${p.enabled ? 'checked' : ''}>
+                                    <label class="form-check-label" for="prov-${name}-enabled">Enabled</label>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <label class="form-label">Available Models</label>
+                                <div class="model-list-small">${modelsHtml}</div>
+                            </div>
+                            <div class="row mt-2">
+                                <div class="col-md-8">
+                                    <label class="form-label">Models Priority (comma-separated)</label>
+                                    <input type="text" class="form-control" id="prov-${name}-models-priority" value="${priorityVal}">
+                                    <small class="form-text text-muted">Order models by preference, e.g. "llama3,codellama"</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">API URL</label>
+                                    <input type="text" class="form-control" id="prov-${name}-apiurl" value="${p.api_url || ''}" readonly>
+                                </div>
+                            </div>
+                        </div>`;
+                }
+
                 return `
                         <div class="border rounded p-3 mb-2">
                             <div class="d-flex justify-content-between align-items-center">
@@ -358,12 +394,26 @@
             const providers = await res.json();
             const payload = { providers: {} };
             for (const name of Object.keys(providers)) {
-                payload.providers[name] = {
-                    enabled: document.getElementById(`prov-${name}-enabled`).checked,
-                    priority: parseInt(document.getElementById(`prov-${name}-priority`).value || '99', 10),
-                    api_key: document.getElementById(`prov-${name}-apikey`).value || undefined,
-                    model: document.getElementById(`prov-${name}-model`).value || providers[name].model || ''
-                };
+                // If provider exposes models (local provider), capture models priority
+                if (providers[name].models && Array.isArray(providers[name].models)) {
+                    const pri = document.getElementById(`prov-${name}-models-priority`).value || '';
+                    const modelsArr = pri.split(',').map(s => s.trim()).filter(Boolean);
+                    payload.providers[name] = {
+                        enabled: document.getElementById(`prov-${name}-enabled`).checked,
+                        priority: parseInt(document.getElementById(`prov-${name}-priority`) ? document.getElementById(`prov-${name}-priority`).value || '99' : (providers[name].priority || 99), 10),
+                        api_key: document.getElementById(`prov-${name}-apikey`) ? document.getElementById(`prov-${name}-apikey`).value || undefined : undefined,
+                        model: document.getElementById(`prov-${name}-model`) ? document.getElementById(`prov-${name}-model`).value || providers[name].model || '' : (providers[name].model || ''),
+                        // send models priority for local provider
+                        models: modelsArr
+                    };
+                } else {
+                    payload.providers[name] = {
+                        enabled: document.getElementById(`prov-${name}-enabled`).checked,
+                        priority: parseInt(document.getElementById(`prov-${name}-priority`).value || '99', 10),
+                        api_key: document.getElementById(`prov-${name}-apikey`).value || undefined,
+                        model: document.getElementById(`prov-${name}-model`).value || providers[name].model || ''
+                    };
+                }
             }
             const resp = await fetch('/api/llm/providers', {
                 method: 'POST',

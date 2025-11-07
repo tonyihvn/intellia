@@ -8,3 +8,6 @@ python-dotenv
 APScheduler
 requests
 python-docx
+xlsxwriter
+seaborn
+matplotlib

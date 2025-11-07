@@ -510,6 +510,14 @@ Requirements:
 - Use only necessary tables and joins from the provided schema context
 - Return accurate count/results
 - Handle NULL values appropriately"""
+        # Add more explicit instructions to ensure the assistant returns executable SQL
+        context += "\n\nAdditional instructions for SQL generation:\n"
+        context += "- When you need to produce SQL, return the SQL in a clear code block or as a plain SQL statement.\n"
+        context += "- Include a single short explanatory comment (1-2 sentences) immediately above the SQL describing what the query does and the expected output format.\n"
+        context += "- Do NOT wrap or prefix the SQL with comment characters that would prevent execution (i.e., ensure the SQL itself is runnable).\n"
+        context += "- If the user requested a particular output format (CSV/Excel/PDF/Word), mention the format in the explanatory comment.\n"
+        context += "- If necessary columns are missing from the provided schema context, ask for clarification rather than guessing column names.\n"
+        context += "- Optionally include a short presentation hint as a JSON snippet after the explanation, for example: {\"presentation\": {\"display\": \"chart\"}}. The client may parse any JSON-like block found in the LLM response to guide rendering.\n"
         return context
 
     def execute_sql(self, sql):

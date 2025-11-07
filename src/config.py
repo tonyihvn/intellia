@@ -458,3 +458,61 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY')
     # Instant execution flag (default false). Set env var INSTANT_EXECUTION=1 to enable.
     INSTANT_EXECUTION = os.getenv('INSTANT_EXECUTION', 'false').lower() in ('1', 'true', 'yes')
+    # Application environment: development | staging | production
+    APP_ENV = os.getenv('APP_ENV', os.getenv('FLASK_ENV', 'development')).lower()
+
+    @classmethod
+    def client_error_payload(cls, message: str, exception: Exception = None, stage: str = None):
+        """Return a payload appropriate for front-end error display depending on environment.
+
+        In development we include the original message and details. In staging we return a
+        friendly suggestion asking the user to refine the prompt. Production can be handled
+        similarly to staging.
+        """
+        try:
+            env = os.getenv('APP_ENV', cls.APP_ENV).lower()
+        except Exception:
+            env = cls.APP_ENV
+        # Development: include full exception details
+        if env == 'development':
+            payload = {'error': message}
+            if exception is not None:
+                try:
+                    payload['details'] = str(exception)
+                except Exception:
+                    payload['details'] = repr(exception)
+                try:
+                    import traceback
+                    payload['traceback'] = traceback.format_exc()
+                except Exception:
+                    pass
+            if stage:
+                payload['stage'] = stage
+            return payload
+
+        # Staging: expose more debugging information to the front-end (per your request).
+        # Include the message, exception details, exception type and optional traceback and stage.
+        if env == 'staging':
+            payload = {'error': message}
+            if exception is not None:
+                try:
+                    payload['details'] = str(exception)
+                except Exception:
+                    payload['details'] = repr(exception)
+                try:
+                    payload['exception_type'] = type(exception).__name__
+                except Exception:
+                    pass
+                try:
+                    import traceback
+                    payload['traceback'] = traceback.format_exc()
+                except Exception:
+                    pass
+            # Surface the processing stage where the error occurred so the UI can report it
+            payload['stage'] = stage or 'unknown'
+            # Also include an instruction for the front-end to display stages if available
+            payload['show_stages'] = True
+            return payload
+
+        # Production / default: friendly message
+        return {'error': 'Need to refine prompt and try again'}

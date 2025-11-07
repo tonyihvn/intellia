@@ -13,6 +13,8 @@ import subprocess
 import json
 import os
 import sys
+import re
+from ..db.connection import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +85,41 @@ class CommandHandler:
             pass
 
         # Try to parse as an action (send_email, call_api, etc.)
+        # Rapid intent detection via QueryEnhancer if available (helps route send_email vs sql quickly)
+        enhancer = getattr(self.query_handler, 'query_enhancer', None)
+        intent_payload = None
+        try:
+            if enhancer and hasattr(enhancer, 'detect_intent'):
+                try:
+                    intent_payload = enhancer.detect_intent(command_text)
+                except Exception:
+                    intent_payload = None
+        except Exception:
+            intent_payload = None
+
         try:
             action_spec = schedule_parser.parse(command_text)
         except Exception as e:
             logger.info(f"Action parser error: {e}")
             action_spec = None
+
+        # If intent detector strongly indicates an action (e.g., send_email or call_api) and parser didn't
+        # identify one, synthesize a minimal action_spec so preview flow proceeds faster.
+        try:
+            if not action_spec and intent_payload and isinstance(intent_payload, dict):
+                it = (intent_payload.get('intent') or '').lower()
+                if it == 'send_email':
+                    # Build a minimal action_spec for send_email
+                    # Attempt to pull any suggested recipient from heuristics
+                    to = None
+                    m = re.search(r"send\s+(?:an\s+)?email\s+to\s+([\w.\-+%]+@[\w.\-]+)\b", command_text, flags=re.I)
+                    if m:
+                        to = m.group(1)
+                    action_spec = {'action': {'type': 'send_email', 'to': to, 'parameters': {}}, 'schedule': None}
+                elif it == 'call_api':
+                    action_spec = {'action': {'type': 'call_api', 'parameters': {}}, 'schedule': None}
+        except Exception:
+            pass
 
         # If parser didn't identify an action, attempt a simple heuristic for common actions
         # e.g., "send an email to foo@bar.com ..."
@@ -258,10 +290,10 @@ class CommandHandler:
 
                         if 'parameters' not in action or not isinstance(action.get('parameters'), dict):
                             action['parameters'] = {}
-                        if subj and not action['parameters'].get('subject'):
-                            action['parameters']['subject'] = subj
-                        if body and not action['parameters'].get('body'):
-                            action['parameters']['body'] = body
+                            if subj and not action['parameters'].get('subject'):
+                                action['parameters']['subject'] = subj
+                            if body and not action['parameters'].get('body'):
+                                action['parameters']['body'] = body
                     except Exception as e:
                         sql_error = f"Email composition failed: {e}"
                 elif action.get('type') == 'add_source':
@@ -290,16 +322,47 @@ class CommandHandler:
                     except Exception as e:
                         sql_error = str(e)
 
+            # If we have an explanation for generated SQL, include it as a SQL comment
+            sql_with_comment = None
+            try:
+                if sql:
+                    if sql_explanation:
+                        safe_expl = str(sql_explanation).strip().replace('*/', '')
+                        sql_with_comment = f"/* {safe_expl} */\n{sql}"
+                    else:
+                        sql_with_comment = sql
+            except Exception:
+                sql_with_comment = sql
+
+            # Attempt to extract any presentation hint from the SQL generator's full response
+            presentation_hint_act = None
+            try:
+                full = gen.get('full_response') if isinstance(gen, dict) else (str(gen) if gen else '')
+                if full and isinstance(full, str):
+                    s = full.find('{')
+                    e = full.rfind('}')
+                    if s != -1 and e != -1:
+                        try:
+                            j = json.loads(full[s:e+1])
+                            if isinstance(j, dict) and 'presentation' in j:
+                                presentation_hint_act = j.get('presentation')
+                        except Exception:
+                            presentation_hint_act = None
+            except Exception:
+                presentation_hint_act = None
+
             preview = {
                 'type': 'action_preview',
                 'action': action,
                 'schedule': schedule,
                 'is_immediate_hint': is_immediate_hint,
-                'sql': sql,
+                'sql': sql_with_comment or sql,
                 'sql_explanation': sql_explanation,
                 'sql_results': sql_results,
                 'sql_error': sql_error,
-                'needs_confirmation': True
+                'needs_confirmation': True,
+                'presentation_hint': presentation_hint_act,
+                'format': (presentation_hint_act.get('display') if isinstance(presentation_hint_act, dict) else None) if presentation_hint_act else None
             }
 
             # Immediate send: consult app settings. If auto_send_emails is enabled, send when an explicit
@@ -512,14 +575,47 @@ class CommandHandler:
                     except Exception as e:
                         sql_error = f"SQL validation error: {e}"
 
+                # If we have an explanation, include it as a SQL comment above the SQL
+                sql_with_comment = None
+                try:
+                    if sql:
+                        if explanation:
+                            safe_expl = str(explanation).strip().replace('*/', '')
+                            sql_with_comment = f"/* {safe_expl} */\n{sql}"
+                        else:
+                            sql_with_comment = sql
+                except Exception:
+                    sql_with_comment = sql
+
+                # Attempt to parse any presentation hint JSON from the LLM full response
+                presentation_hint = None
+                try:
+                    full = gen.get('full_response') if isinstance(gen, dict) else (str(gen) if gen else '')
+                    if full and isinstance(full, str):
+                        s = full.find('{')
+                        e = full.rfind('}')
+                        if s != -1 and e != -1:
+                            try:
+                                j = json.loads(full[s:e+1])
+                                # if JSON contains presentation key, surface it
+                                if isinstance(j, dict) and 'presentation' in j:
+                                    presentation_hint = j.get('presentation')
+                            except Exception:
+                                # best-effort: ignore parse errors
+                                presentation_hint = None
+                except Exception:
+                    presentation_hint = None
+
                 return {
                     'type': 'query_preview',
-                    'sql': sql,
+                    'sql': sql_with_comment or sql,
                     'explanation': explanation,
                     'results': None,
                     'error': sql_error,
                     'needs_confirmation': True,
-                    'classifier': cls
+                    'classifier': cls,
+                    'presentation_hint': presentation_hint,
+                    'format': (presentation_hint.get('display') if isinstance(presentation_hint, dict) else None) if presentation_hint else None
                 }
 
             # execute True => actually run the query
@@ -603,13 +699,19 @@ class CommandHandler:
                     recipients = [recipients]
                 else:
                     # try to extract patient id and lookup email
-                    import re
                     m = re.search(r'(?:patient[_\s]*id[:=\s]*)(\d+)', command_text, re.I)
                     if m:
                         pid = m.group(1)
-                        recipients = [self._lookup_email_for_patient(pid)]
+                        email = self._lookup_email_for_patient(pid)
+                        recipients = [email] if email else []
                     else:
-                        recipients = [recipients]
+                        # treat as a contact name; attempt DB lookup for matching emails
+                        names_found = self._lookup_email_by_name(recipients)
+                        if names_found:
+                            recipients = names_found
+                        else:
+                            # fallback: keep original string (may be resolved later)
+                            recipients = [recipients]
 
             result_payload = None
             if action.get('type') == 'send_email':
@@ -715,3 +817,75 @@ class CommandHandler:
         except Exception:
             pass
         return ''
+
+    def _lookup_email_by_name(self, name: str):
+        """Try to find one or more email addresses for a person/contact by name.
+
+        This method is tolerant to common schemas. It tries several likely tables
+        and columns using case-insensitive LIKE searches. Returns a list of
+        matching email addresses (may be empty).
+        """
+        emails = []
+        try:
+            q = name or ''
+            q = q.strip()
+            if not q:
+                return []
+
+            # split into tokens to allow partial matching
+            tokens = [t for t in q.replace(',', ' ').split() if t]
+            like_clause = '%' + '%'.join(tokens) + '%'
+
+            conn = None
+            try:
+                conn = get_db_connection()
+                if not conn:
+                    return []
+
+                cur = conn.cursor()
+                # Try a sequence of common tables/columns
+                candidates = [
+                    ("contacts", "email", ["full_name", "name", "contact_name"]),
+                    ("people", "email", ["full_name", "name", "first_name", "last_name"]),
+                    ("users", "email", ["full_name", "username", "name", "first_name", "last_name"]),
+                    ("patients", "email", ["full_name", "first_name", "last_name"]),
+                ]
+
+                for table, email_col, name_cols in candidates:
+                    for col in name_cols:
+                        try:
+                            # very light sanitization for identifiers
+                            if not re.match(r'^[A-Za-z0-9_]+$', col) or not re.match(r'^[A-Za-z0-9_]+$', table) or not re.match(r'^[A-Za-z0-9_]+$', email_col):
+                                continue
+                            sql = f"SELECT `{email_col}` FROM `{table}` WHERE LOWER(`{col}`) LIKE %s LIMIT 10"
+                            cur.execute(sql, (like_clause.lower(),))
+                            rows = cur.fetchall() or []
+                            for r in rows:
+                                try:
+                                    val = r[0]
+                                    if val and isinstance(val, (str,)) and '@' in val:
+                                        emails.append(val.strip())
+                                except Exception:
+                                    continue
+                            if emails:
+                                # stop early if found
+                                break
+                        except Exception:
+                            continue
+                    if emails:
+                        break
+            finally:
+                try:
+                    if conn:
+                        conn.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Deduplicate and return
+        out = []
+        for e in emails:
+            if e not in out:
+                out.append(e)
+        return out

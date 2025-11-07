@@ -386,22 +386,100 @@ class RAGManager:
             # 3) Find relevant business rules filtered by these tables
             rules_texts = []
             try:
-                br = self.business_rules_collection.query(question, n_results=20)
-                # prefer rules whose metadata.table is in table_names
+                # First, collect any rules explicitly marked as 'compulsory' from the full store
+                try:
+                    all_rules = self.business_rules_collection.get_all()
+                except Exception:
+                    all_rules = []
+
+                compulsory_docs = []
+                for item in all_rules:
+                    meta = item.get('metadata') or {}
+                    cat = meta.get('category') if isinstance(meta, dict) else None
+                    if isinstance(cat, str) and cat.strip().lower() == 'compulsory':
+                        compulsory_docs.append(item.get('text'))
+
+                # Next perform a semantic search to get candidate rules
+                br = self.business_rules_collection.query(question, n_results=50)
+
+                # Build prioritized lists: first compulsory (deduped), then rules matching table metadata,
+                # then rules whose text mentions relevant column names, then fallback to top results.
                 filtered = []
-                for doc, meta, dist in zip(br.get('documents', []), br.get('metadatas', []), br.get('distances', [])):
+                table_columns = {}
+                # build a simple map of table -> column names for column-mention matching
+                try:
+                    for t in table_names:
+                        info = self.schema_context.get_table_info(t)
+                        if info and info.get('columns'):
+                            cols = [c.get('column_name') or c.get('Field') for c in info.get('columns', [])]
+                            table_columns[t] = [c for c in cols if c]
+                except Exception:
+                    table_columns = {}
+
+                # iterate semantic results and find those that match table metadata first
+                semantic_docs = list(zip(br.get('documents', []), br.get('metadatas', []), br.get('distances', [])))
+                table_matched = []
+                column_matched = []
+                for doc, meta, dist in semantic_docs:
                     m_table = None
                     if isinstance(meta, dict):
                         m_table = meta.get('table') or meta.get('tables')
+                    intersects = False
                     if m_table:
                         if isinstance(m_table, list):
                             intersects = any(x in table_names for x in m_table)
                         else:
                             intersects = m_table in table_names
-                        if intersects:
-                            filtered.append((doc, meta, dist))
-                # If none exactly matched, fall back to top results
-                chosen = filtered[:max_rules] if filtered else list(zip(br.get('documents', []), br.get('metadatas', []), br.get('distances', [])))[:max_rules]
+                    if intersects:
+                        table_matched.append((doc, meta, dist))
+                        continue
+
+                    # crude column mention check
+                    lowered = (doc or '').lower()
+                    matched_col = False
+                    for cols in table_columns.values():
+                        for col in cols:
+                            if col and col.lower() in lowered:
+                                matched_col = True
+                                break
+                        if matched_col:
+                            break
+                    if matched_col:
+                        column_matched.append((doc, meta, dist))
+
+                # Build final chosen list respecting compulsory rules first
+                chosen_docs = []
+                seen = set()
+
+                # add compulsory docs first
+                for d in compulsory_docs:
+                    if d and d not in seen:
+                        chosen_docs.append((d, {'category': 'compulsory'}, 1.0))
+                        seen.add(d)
+
+                # then add table_matched
+                for doc, meta, dist in table_matched:
+                    if doc and doc not in seen:
+                        chosen_docs.append((doc, meta, dist))
+                        seen.add(doc)
+
+                # then column matched
+                for doc, meta, dist in column_matched:
+                    if doc and doc not in seen:
+                        chosen_docs.append((doc, meta, dist))
+                        seen.add(doc)
+
+                # finally take top semantic candidates to fill up to max_rules
+                for doc, meta, dist in semantic_docs:
+                    if len(chosen_docs) >= max_rules:
+                        break
+                    if doc and doc not in seen:
+                        chosen_docs.append((doc, meta, dist))
+                        seen.add(doc)
+
+                # ensure we don't exceed max_rules
+                chosen = chosen_docs[:max_rules]
+
                 for doc, meta, dist in chosen:
                     rules_texts.append(doc)
             except Exception:

@@ -192,7 +192,8 @@ def manage_sources():
                 json.dump({'sources': sources}, f, indent=4)
             return jsonify({'success': True})
         except Exception as e:
-            return jsonify({'error': f'Failed to update sources file: {str(e)}'}), 500
+            payload = Config.client_error_payload(f'Failed to update sources file: {str(e)}', e)
+            return jsonify(payload), 500
 
 @rag_routes.route('/api/rag/knowledge', methods=['GET'])
 def get_all_knowledge():
@@ -209,7 +210,8 @@ def get_all_knowledge():
     except Exception as e:
         # Return empty lists rather than an error status so the UI can show empty state
         logging.warning(f"Failed to load RAG knowledge: {e}")
-        return jsonify({'schema': [], 'business_rules': [], 'examples': [], 'error': str(e)})
+        payload = Config.client_error_payload(str(e), e)
+        return jsonify(payload), 500
 
 
 @rag_routes.route('/api/rag/clarify', methods=['POST'])
@@ -267,4 +269,5 @@ def summarize_compact_context():
         compact = rag_manager.get_compact_context(question)
         return jsonify({'summary': compact.get('summary', ''), 'tables': compact.get('tables', []), 'rules': compact.get('rules', [])})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        payload = Config.client_error_payload(str(e), e)
+        return jsonify(payload), 500

@@ -299,6 +299,55 @@
         justify-content: flex-end;
     }
 
+    /* SQL Panel styles */
+    #sqlPanel {
+        margin: 15px 0;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    #sqlPanel .panel-header {
+        padding: 10px 15px;
+        border-bottom: 1px solid #e9ecef;
+        background: #f8f9fa;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    #sqlEditor {
+        width: 100%;
+        min-height: 150px;
+        padding: 15px;
+        border: none;
+        font-family: monospace;
+        resize: vertical;
+        display: none;
+        /* Collapsed by default */
+    }
+
+    .sql-controls {
+        display: flex;
+        gap: 10px;
+    }
+
+    /* Export controls */
+    .export-controls {
+        margin-top: 15px;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .export-btn {
+        padding: 5px 10px;
+        font-size: 0.875rem;
+    }
+
     .chat-row.assistant {
         justify-content: flex-start;
     }
@@ -346,12 +395,15 @@
     <div class="command-container">
 
 
+        <!-- (SQL controls moved below chat panel) -->
+
         <!-- Chat panel: shows user messages and assistant replies above the input -->
         <div class="mb-3">
             <div id="chatPanel" aria-live="polite" aria-atomic="false">
                 <!-- Chat bubbles will be appended here -->
                 <div class="text-muted"></div>
             </div>
+            <!-- SQL controls moved to the SQL panel below Confirm (editor will be placed there) -->
 
             <label for="commandInput" class="form-label"><b>What would you like to do?</b></label>
             <small class="text-muted"><i>Ask questions, schedule tasks, or take immediate actions</i></small>
@@ -369,6 +421,8 @@
             <button id="micBtn" class="btn btn-outline-secondary ms-2" title="Speak your command">
                 <i class="fas fa-microphone"></i>
             </button>
+
+            <button id="confirmBtn" class="btn btn-success" disabled>Confirm (Execute)</button>
         </div>
 
         <div class="row command-row">
@@ -396,35 +450,19 @@
                     <!-- <div class="d-flex justify-content-between align-items-center"> -->
 
                     <div class="mt-2">
-                        <button id="confirmBtn" class="btn btn-success" disabled>Confirm (Execute)</button>
                         <!-- <button id="toggleResultBtn" class="btn btn-sm btn-outline-secondary ms-2">Show Results</button> -->
                         <div id="confirmResult" class="mt-2" style="position: relative; overflow: scroll !important;">
                         </div>
                     </div>
+                    <!-- Controls for showing/executing SQL placed above the editor -->
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+                        <button id="toggleSql" class="btn btn-sm btn-outline-secondary">Show SQL</button>
+                        <button id="executeRawBtn" class="btn btn-sm btn-primary">Execute Raw SQL</button>
+                    </div>
                     <textarea id="sqlEditor" style="width:100%; min-height:50px; display:none;"
                         class="mt-2 form-control" placeholder="Generated SQL will appear here"></textarea>
-                    <div id="chartControls">
-                        <div class="mb-2">
-                            <button id="toggleSql" class="btn btn-sm btn-outline-secondary me-2"
-                                style="display:inline-block">Show SQL</button>
-                            <button id="executeRawBtn" class="btn btn-sm btn-outline-primary"
-                                style="display:inline-block">Execute Raw SQL</button>
-                        </div>
-                        <div class="mt-2">
-                            <label for="chartTypeSelect" class="form-label small">Chart type:</label>
-                            <select id="chartTypeSelect" class="form-select form-select-sm"
-                                style="display:inline-block; width:auto; margin-right:6px">
-                                <option value="bar">Bar</option>
-                                <option value="line">Line</option>
-                                <option value="pie">Pie</option>
-                                <option value="area">Area</option>
-                            </select>
-                            <button id="showChartBtn" class="btn btn-sm btn-outline-info">Show Chart</button>
-                            <button id="exportWordBtn" class="btn btn-sm btn-outline-secondary">Export to Word</button>
-                            <button id="compressSummaryBtn" class="btn btn-sm btn-outline-primary">Compressed
-                                Summary</button>
-                        </div>
-                    </div>
+                    <!-- chartControls will be populated and shown dynamically when needed -->
+                    <div id="chartControls" style="display:none"></div>
 
                 </div>
             </div>
@@ -569,6 +607,16 @@
     }
     // Collapse sidebar immediately when a history item is clicked
     document.addEventListener('DOMContentLoaded', () => {
+        // Ensure a result container exists to avoid null-reference errors in older/alternate templates
+        if (!document.getElementById('result')) {
+            const resultPlaceholder = document.createElement('div');
+            resultPlaceholder.id = 'result';
+            resultPlaceholder.style.display = 'none';
+            resultPlaceholder.className = 'result-container';
+            // Append to a sensible parent if present, otherwise body
+            const parent = document.getElementById('main') || document.getElementById('content') || document.body;
+            parent.appendChild(resultPlaceholder);
+        }
         if (isMobile()) {
             hideHistorySidebar();
         }
@@ -623,6 +671,8 @@
 
         // Immediately show the user's message in the chat panel and record it
         appendChat('user', command);
+        // Save latest command so rendering logic can refer to user intent (chart/table/analysis/email)
+        window.latestCommand = command;
 
         const button = document.getElementById('submitBtn');
         const originalText = button.innerHTML;
@@ -861,47 +911,38 @@
     }
 
     // SQL collapse toggle handler. Editor is collapsed by default; user expands it.
-    document.getElementById('toggleSql').addEventListener('click', () => {
-        const editor = document.getElementById('sqlEditor');
-        const btn = document.getElementById('toggleSql');
-        if (!editor) return;
-        if (editor.style.display === 'none' || editor.style.display === '') {
-            editor.style.display = 'block';
-            btn.textContent = 'Collapse SQL';
-        } else {
-            editor.style.display = 'none';
-            btn.textContent = 'Show SQL';
-        }
-    });
+    const toggleSqlBtn = document.getElementById('toggleSql') || document.getElementById('toggleSqlBelow');
+    if (toggleSqlBtn) {
+        toggleSqlBtn.addEventListener('click', () => {
+            const editor = document.getElementById('sqlEditor');
+            const btn = toggleSqlBtn;
+            if (!editor) return;
+            if (editor.style.display === 'none' || editor.style.display === '') {
+                editor.style.display = 'block';
+                btn.textContent = 'Collapse SQL';
+            } else {
+                editor.style.display = 'none';
+                btn.textContent = 'Show SQL';
+            }
+        });
+    }
 
 
     // Enable Confirm button if there is SQL in the editor
     const sqlEditor = document.getElementById('sqlEditor');
     const confirmBtn = document.getElementById('confirmBtn');
     function updateConfirmBtnState() {
-        // Enable Confirm for any actionable preview: SQL, send mail, schedule, read website, etc.
-        let enable = false;
+        // Confirm button is always enabled if there's a preview or SQL
         const sqlVal = sqlEditor.value && sqlEditor.value.trim();
-        if (sqlVal) enable = true;
-        if (window.latestPreview) {
-            const type = window.latestPreview.type;
-            // Enable for any actionable type
-            if ([
-                'action_preview',
-                'query_preview',
-                'action_completed',
-                'action_failed',
-                'read_webpage',
-                'send_email',
-                'schedule_task',
-                'call_api',
-                'sql_executed',
-                'query_result'
-            ].includes(type)) {
-                enable = true;
-            }
+        const hasPreview = window.latestPreview && Object.keys(window.latestPreview).length > 0;
+        confirmBtn.disabled = false; // Always enabled
+        if (sqlVal || hasPreview) {
+            confirmBtn.classList.remove('btn-secondary');
+            confirmBtn.classList.add('btn-success');
+        } else {
+            confirmBtn.classList.remove('btn-success');
+            confirmBtn.classList.add('btn-secondary');
         }
-        confirmBtn.disabled = !enable;
     }
     sqlEditor.addEventListener('input', updateConfirmBtnState);
     updateConfirmBtnState();
@@ -944,9 +985,62 @@
             // clear temporary message and re-enable
             confirmResultEl.innerHTML = '';
             if (confirmBtnEl) confirmBtnEl.disabled = false;
+
             if (res.error) {
-                // show inline error below confirm button
-                confirmResultEl.innerHTML = `<div class="error-message">${escapeHtml(res.error || 'Execution error')}</div>`;
+                // Show error with explanation and attempt auto-retry
+                const errorMsg = res.error || 'Execution error';
+                const errorDetails = res.error_details || res.explanation || '';
+
+                // Create error display with details
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-message mb-3';
+                errorDiv.innerHTML = `
+                    <div><i class="fas fa-exclamation-circle"></i> ${escapeHtml(errorMsg)}</div>
+                    ${errorDetails ? `<div class="small mt-2">${escapeHtml(errorDetails)}</div>` : ''}
+                `;
+                confirmResultEl.appendChild(errorDiv);
+
+                // If this looks like an SQL error, try to auto-correct with LLM
+                if (payload.sql && (errorMsg.toLowerCase().includes('sql') || errorDetails.toLowerCase().includes('sql'))) {
+                    try {
+                        // Show retry attempt
+                        const retryDiv = document.createElement('div');
+                        retryDiv.className = 'alert alert-info mt-2';
+                        retryDiv.innerHTML = `<i class="fas fa-sync-alt"></i> Attempting to fix the SQL error...`;
+                        confirmResultEl.appendChild(retryDiv);
+
+                        // Call LLM to fix SQL
+                        const fixResp = await fetch('/api/fix_sql', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sql: payload.sql,
+                                error: errorMsg,
+                                details: errorDetails,
+                                command: payload.command
+                            })
+                        });
+                        const fixRes = await fixResp.json();
+
+                        if (fixRes.fixed_sql) {
+                            // Show the fix and explanation
+                            retryDiv.className = 'alert alert-success mt-2';
+                            retryDiv.innerHTML = `
+                                <div><i class="fas fa-check-circle"></i> Fixed SQL Available:</div>
+                                <div class="small mt-2">${escapeHtml(fixRes.explanation || '')}</div>
+                                <pre class="mt-2">${escapeHtml(fixRes.fixed_sql)}</pre>
+                                <button class="btn btn-sm btn-primary mt-2" onclick="applySqlFix(${JSON.stringify(fixRes.fixed_sql)})">
+                                    Apply Fix & Retry
+                                </button>
+                            `;
+                        } else {
+                            retryDiv.className = 'alert alert-warning mt-2';
+                            retryDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Couldn't automatically fix the SQL error.`;
+                        }
+                    } catch (retryErr) {
+                        console.error('Auto-fix attempt failed:', retryErr);
+                    }
+                }
             } else {
                 // Render formatted payload if present, otherwise show a short success / result summary
                 if (res.formatted && (res.formatted.content || res.formatted.content_type)) {
@@ -1014,24 +1108,27 @@
         }
     });
 
-    document.getElementById('executeRawBtn').addEventListener('click', async () => {
-        const sql = document.getElementById('sqlEditor').value;
-        if (!sql) { alert('No SQL to execute'); return; }
-        const ok = confirm('Execute raw SQL now? This will run the SQL against the database. Proceed?');
-        if (!ok) return;
-        try {
-            const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
-            const data = await resp.json();
-            if (data.error) {
-                displayError(data.error);
-            } else {
-                displayResult({ type: 'query_result', sql, results: data });
+    const executeRaw = document.getElementById('executeRawBtnBelow') || document.getElementById('executeRawBtn');
+    if (executeRaw) {
+        executeRaw.addEventListener('click', async () => {
+            const sql = document.getElementById('sqlEditor').value;
+            if (!sql) { alert('No SQL to execute'); return; }
+            const ok = confirm('Execute raw SQL now? This will run the SQL against the database. Proceed?');
+            if (!ok) return;
+            try {
+                const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+                const data = await resp.json();
+                if (data.error) {
+                    displayError(data.error);
+                } else {
+                    displayResult({ type: 'query_result', sql, results: data });
+                }
+            } catch (e) {
+                console.error(e);
+                displayError('Failed to execute SQL');
             }
-        } catch (e) {
-            console.error(e);
-            displayError('Failed to execute SQL');
-        }
-    });
+        });
+    }
 
     // Enhanced: Always draw a chart if the user requested a chart, even if backend did not return chart format
     function displayResult(data) {
@@ -1074,64 +1171,69 @@
             tabularData = data.data;
         }
 
-        // If tabular data is available, do NOT auto-render table/chart/analysis.
-        // Instead show explicit buttons the user must click to render each view.
+        // If tabular data is available, auto-render according to requested format
         if (tabularData && tabularData.length > 0) {
-            const info = document.createElement('div');
-            info.className = 'mb-2';
-            info.innerHTML = `<div class='alert alert-info'>${tabularData.length} rows available. Click a view to render.</div>`;
-            const btnGroup = document.createElement('div');
-            btnGroup.className = 'btn-group mb-2';
-            const tableBtn = document.createElement('button');
-            tableBtn.className = 'btn btn-sm btn-outline-primary';
-            tableBtn.textContent = 'Show Table';
-            const chartBtn = document.createElement('button');
-            chartBtn.className = 'btn btn-sm btn-outline-primary';
-            chartBtn.textContent = 'Show Chart';
-            const analysisBtn = document.createElement('button');
-            analysisBtn.className = 'btn btn-sm btn-outline-primary';
-            analysisBtn.textContent = 'Show Analysis';
-            btnGroup.appendChild(tableBtn);
-            btnGroup.appendChild(chartBtn);
-            btnGroup.appendChild(analysisBtn);
-            resultDiv.appendChild(info);
-            resultDiv.appendChild(btnGroup);
+            // Determine desired format: prefer server-provided formatted.format, else inspect user's last command
+            let requestedFormat = (data.formatted && data.formatted.format) ? data.formatted.format : null;
+            const cmd = (window.latestCommand || '').toLowerCase();
+            if (!requestedFormat) {
+                if (cmd.includes('chart') || cmd.includes('plot') || cmd.includes('graph')) requestedFormat = 'chart';
+                else if (cmd.includes('analysis') || cmd.includes('analyze') || cmd.includes('summar')) requestedFormat = 'analysis';
+                else if (cmd.includes('csv') || cmd.includes('download') || cmd.includes('excel')) requestedFormat = 'csv';
+                else requestedFormat = 'table';
+            }
 
-            // Containers are created lazily when requested
-            let tableRendered = false, chartRendered = false, analysisRendered = false;
-            tableBtn.addEventListener('click', () => {
-                if (tableRendered) return;
-                const tableContainer = document.createElement('div');
-                resultDiv.appendChild(tableContainer);
-                displayTable(tabularData, tableContainer);
-                tableRendered = true;
-            });
-            chartBtn.addEventListener('click', () => {
-                if (chartRendered) return;
-                const chartContainer = document.createElement('div');
-                resultDiv.appendChild(chartContainer);
-                // Create a simple bar chart if numeric column exists
-                const keys = Object.keys(tabularData[0]);
-                const labelKey = keys[0];
-                const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
-                const canvas = document.createElement('canvas');
-                canvas.style.maxHeight = '400px';
-                chartContainer.appendChild(canvas);
-                new Chart(canvas.getContext('2d'), {
-                    type: 'bar',
-                    data: {
-                        labels: tabularData.map(row => row[labelKey]),
-                        datasets: [{ label: valueKey, data: tabularData.map(row => row[valueKey]), backgroundColor: '#3498db' }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false }
-                });
-                chartRendered = true;
-            });
-            analysisBtn.addEventListener('click', () => {
-                if (analysisRendered) return;
+            if (requestedFormat === 'chart') {
+                // If presentation hint indicates a specific chart type, respect it (e.g., pie)
+                try {
+                    const pres = (data.presentation_hint || (data.formatted && data.formatted.presentation)) || null;
+                    let chartType = 'bar';
+                    if (pres && pres.type) chartType = pres.type;
+                    // Render pie if indicated
+                    if (chartType === 'pie' || (pres && pres.display === 'pie')) {
+                        const keys = Object.keys(tabularData[0]);
+                        const labelKey = keys[0];
+                        const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                        const chartContainer = document.createElement('div');
+                        const canvas = document.createElement('canvas');
+                        canvas.style.maxHeight = '400px';
+                        chartContainer.appendChild(canvas);
+                        resultDiv.appendChild(chartContainer);
+                        new Chart(canvas.getContext('2d'), {
+                            type: 'pie',
+                            data: {
+                                labels: tabularData.map(row => row[labelKey]),
+                                datasets: [{ data: tabularData.map(row => row[valueKey]), backgroundColor: tabularData.map((_, i) => `hsl(${(i * 40) % 360} 70% 50%)`) }]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false }
+                        });
+                        return;
+                    }
+
+                    // Fallback to bar chart
+                    const keys = Object.keys(tabularData[0]);
+                    const labelKey = keys[0];
+                    const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                    const chartContainer = document.createElement('div');
+                    const canvas = document.createElement('canvas');
+                    canvas.style.maxHeight = '400px';
+                    chartContainer.appendChild(canvas);
+                    resultDiv.appendChild(chartContainer);
+                    new Chart(canvas.getContext('2d'), {
+                        type: 'bar',
+                        data: {
+                            labels: tabularData.map(row => row[labelKey]),
+                            datasets: [{ label: valueKey, data: tabularData.map(row => row[valueKey]), backgroundColor: '#3498db' }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                    return;
+                } catch (e) {
+                    console.warn('chart render failed', e);
+                }
+            } else if (requestedFormat === 'analysis') {
                 const analysisContainer = document.createElement('div');
                 resultDiv.appendChild(analysisContainer);
-                // Simple analysis summary
                 let summary = `<b>Analysis & Comparisons:</b><br>`;
                 summary += `Rows: ${tabularData.length}<br>`;
                 const keys = Object.keys(tabularData[0]);
@@ -1146,9 +1248,24 @@
                     }
                 }
                 analysisContainer.innerHTML = summary;
-                analysisRendered = true;
-            });
-            return;
+                return;
+            } else if (requestedFormat === 'csv') {
+                // Build CSV and provide download link
+                const cols = Object.keys(tabularData[0]);
+                const rows = [cols.join(',')].concat(tabularData.map(r => cols.map(c => '"' + String(r[c] === undefined ? '' : r[c]).replace(/"/g, '""') + '"').join(',')));
+                const csv = rows.join('\n');
+                const dl = document.createElement('a');
+                dl.className = 'btn btn-sm btn-primary';
+                dl.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                dl.download = 'results.csv';
+                dl.textContent = 'Download CSV';
+                resultDiv.appendChild(dl);
+                return;
+            } else {
+                // Default: render table
+                displayTable(tabularData, resultDiv);
+                return;
+            }
         }
 
         // Fallback: show table or text as before
@@ -1173,29 +1290,41 @@
     }
 
     function displayData(data) {
-        // Do not auto-render table/chart/analysis. Provide explicit buttons to the user.
         const resultDiv = document.getElementById('result');
         resultDiv.innerHTML = '';
         if (!data) return;
         if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
+            // Determine requested format from preview or command
+            let requestedFormat = '';
+            const preview = window.latestPreview || {};
+            const command = document.getElementById('commandInput').value.toLowerCase();
+
+            // Check for explicit format requests in the command
+            if (command.includes('chart') || command.includes('graph') || command.includes('plot')) {
+                requestedFormat = 'chart';
+            } else if (command.includes('table') || command.includes('list')) {
+                requestedFormat = 'table';
+            } else if (command.includes('analysis') || command.includes('summary') || command.includes('analyze')) {
+                requestedFormat = 'analysis';
+            }
+
+            // Also check preview metadata for format hints
+            if (preview.format) requestedFormat = preview.format;
+            if (preview.display_type) requestedFormat = preview.display_type;
+            if (preview.visualization) requestedFormat = 'chart';
+
+            // Always show row count
             const info = document.createElement('div');
             info.className = 'mb-2';
-            info.innerHTML = `<div class='alert alert-info'>${data.length} rows available. Click a view to render.</div>`;
-            const btnGroup = document.createElement('div');
-            btnGroup.className = 'btn-group mb-2';
-            const tableBtn = document.createElement('button');
-            tableBtn.className = 'btn btn-sm btn-outline-primary';
-            tableBtn.textContent = 'Show Table';
-            const chartBtn = document.createElement('button');
-            chartBtn.className = 'btn btn-sm btn-outline-primary';
-            chartBtn.textContent = 'Show Chart';
-            btnGroup.appendChild(tableBtn);
-            btnGroup.appendChild(chartBtn);
+            info.innerHTML = `<div class='alert alert-info'>${data.length} rows available.</div>`;
             resultDiv.appendChild(info);
-            resultDiv.appendChild(btnGroup);
 
-            tableBtn.addEventListener('click', () => displayTable(data));
-            chartBtn.addEventListener('click', () => displayChart(data));
+            // Render in requested format or default to table
+            if (requestedFormat === 'chart' && hasChartableData(data)) {
+                displayChart(data);
+            } else {
+                displayTable(data);
+            }
             return;
         }
 
@@ -1398,8 +1527,51 @@
         return result || '<div></div>';
     }
 
+    // Export result data in various formats
+    async function exportResult(format) {
+        const resultDiv = document.getElementById('confirmResult');
+        let data = window.latestPreview || {};
+
+        // If there's SQL in the editor, include it
+        const sqlEditor = document.getElementById('sqlEditor');
+        if (sqlEditor && sqlEditor.value.trim()) {
+            data.sql = sqlEditor.value.trim();
+        }
+
+        try {
+            const response = await fetch(`/api/export/${format}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ data: data })
+            });
+
+            if (response.ok) {
+                // Trigger download for successful response
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `results.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+            } else {
+                const error = await response.json();
+                alert(`Export failed: ${error.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Export failed: ' + error.message);
+        }
+    }
+
     function displayTextResult(data) {
         const resultDiv = document.getElementById('result');
+        // Store latest data for export functionality
+        window.latestPreview = data;
 
         if (Array.isArray(data)) {
             const formattedContent = data.map(row => {
@@ -1465,6 +1637,23 @@
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
+    }
+
+    function applySqlFix(fixedSql) {
+        // Update SQL editor with fixed SQL
+        const sqlEditor = document.getElementById('sqlEditor');
+        if (sqlEditor) {
+            sqlEditor.value = fixedSql;
+            // Retry execution with fixed SQL
+            document.getElementById('confirmBtn').click();
+        }
+    }
+
+    function hasChartableData(data) {
+        if (!Array.isArray(data) || data.length === 0) return false;
+        // Check if there's at least one numeric column
+        const firstRow = data[0];
+        return Object.values(firstRow).some(val => typeof val === 'number' || !isNaN(parseFloat(val)));
     }
 
     function isLikelySQL(s) {

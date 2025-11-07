@@ -119,7 +119,8 @@ def handle_llm_config():
             
     except Exception as e:
         print(f"Error in handle_llm_config: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        payload = Config.client_error_payload(str(e), e)
+        return jsonify(payload), 500
 
 @settings_routes.route('/llm/providers', methods=['GET', 'POST'])
 def manage_providers():
@@ -144,6 +145,43 @@ def manage_providers():
                 'api_url': p.get('api_url', ''),
                 'api_key': api_key
             }
+        # Augment with local Ollama model information when available
+        try:
+            # Only add detailed model list for the 'local' provider
+            if 'local' in providers:
+                # Reuse the existing route logic to detect installed models
+                resp = requests.get('http://localhost:11434/api/tags', timeout=3)
+                installed_tags = []
+                if resp.status_code == 200:
+                    installed_tags = [m.get('name') for m in resp.json().get('models', []) if m.get('name')]
+
+                installed_basenames = set([name.split(':', 1)[0] for name in installed_tags])
+
+                llm_cfg = Config.get_llm_config()
+                priority = llm_cfg.get('providers', {}).get('local', {}).get('models', [])
+
+                combined = []
+                seen = set()
+
+                def add_model_entry(model_name):
+                    base = model_name.split(':', 1)[0]
+                    installed = (model_name in installed_tags) or (base in installed_basenames)
+                    key = model_name
+                    if key in seen:
+                        return
+                    seen.add(key)
+                    combined.append({'name': model_name, 'installed': installed})
+
+                for name in priority:
+                    add_model_entry(name)
+                for tag in installed_tags:
+                    add_model_entry(tag)
+
+                out['local'].update({'models': combined, 'running': True if installed_tags else False, 'models_priority': priority})
+        except Exception:
+            # If Ollama isn't reachable, still return provider entry without models
+            out.get('local', {}).update({'models': [], 'running': False, 'models_priority': []})
+
         return jsonify(out)
 
     # POST to update
@@ -172,6 +210,11 @@ def manage_providers():
             changed = True
         if 'model' in p:
             cfg['providers'][name]['model'] = p['model']
+            changed = True
+        # allow updating local models priority list
+        if name == 'local' and 'models' in p and isinstance(p['models'], list):
+            # store the list of model names in the local provider config
+            cfg['providers'][name]['models'] = p['models']
             changed = True
 
     ok = Config.save_llm_config(cfg)
@@ -304,7 +347,8 @@ def pull_ollama_models():
         success = len(errors) == 0
         return jsonify({'success': success, 'pulled': pulled, 'skipped': skipped, 'errors': errors}), (200 if success else 207)
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        payload = Config.client_error_payload(str(e), e)
+        return jsonify(payload), 500
 
 @settings_routes.route('/settings/guiders', methods=['GET', 'POST', 'DELETE'])
 def handle_guiders():
@@ -381,7 +425,8 @@ def handle_sources():
                 save_config('sources', {'sources': sources})
                 return jsonify({'success': True, 'source': source_info})
             except Exception as e:
-                return jsonify({'error': f'Failed to save source: {str(e)}'}), 500
+                payload = Config.client_error_payload(f'Failed to save source: {str(e)}', e)
+                return jsonify(payload), 500
         else:
             return jsonify({'error': 'Source already exists'}), 400
     
@@ -442,7 +487,11 @@ def handle_examples():
             examples = [d.get('text') for d in docs]
             return jsonify({'examples': examples})
         except Exception as e:
-            return jsonify({'examples': [], 'error': str(e)}), 500
+            payload = Config.client_error_payload(str(e), e)
+            # include examples fallback plus error payload
+            out = {'examples': []}
+            out.update(payload)
+            return jsonify(out), 500
 
     if request.method == 'POST':
         data = request.get_json() or {}
@@ -457,7 +506,7 @@ def handle_examples():
                 return jsonify({'success': True})
             return jsonify({'error': 'Failed to persist example'}), 500
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return jsonify(Config.client_error_payload(str(e), e)), 500
 
     if request.method == 'DELETE':
         data = request.get_json() or {}
@@ -470,7 +519,7 @@ def handle_examples():
                 return jsonify({'success': True})
             return jsonify({'error': 'Failed to delete example'}), 500
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return jsonify(Config.client_error_payload(str(e), e)), 500
 
 
 @settings_routes.route('/settings/app', methods=['GET', 'POST'])
@@ -481,7 +530,8 @@ def handle_app_settings():
             cfg = load_config('app') or {}
             return jsonify(cfg)
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            payload = Config.client_error_payload(str(e), e)
+            return jsonify(payload), 500
 
     if request.method == 'POST':
         try:
@@ -495,4 +545,5 @@ def handle_app_settings():
             save_config('app', out)
             return jsonify({'success': True})
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            payload = Config.client_error_payload(str(e), e)
+            return jsonify(payload), 500

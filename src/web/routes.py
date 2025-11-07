@@ -7,6 +7,7 @@ from ..rag.manager import RAGManager
 from ..rag.schema_context import SchemaContextManager
 from ..config import Config
 from .history_manager import HistoryManager
+from .export_routes import export_routes
 import os
 import logging
 # Prefer mysql.connector if available, fall back to pymysql, otherwise leave a None placeholder
@@ -39,6 +40,15 @@ except Exception:
     Document = None
 
 main_routes = Blueprint('main', __name__, url_prefix='/api')
+
+
+def client_error_response(message, exception=None, status=500):
+    """Return a Flask response with an environment-appropriate error payload."""
+    try:
+        payload = Config.client_error_payload(message, exception)
+    except Exception:
+        payload = {'error': 'An internal error occurred'}
+    return jsonify(payload), status
 
 def get_query_handler():
     """
@@ -627,6 +637,14 @@ def confirm_action():
             history.insert(0, preview_entry)
             Config.save_query_history(history[:50])
 
+        # Special-case: if user asked to operate "from the result", reuse last successful result
+        use_previous_result = False
+        try:
+            if command and isinstance(command, str) and 'from the result' in command.lower():
+                use_previous_result = True
+        except Exception:
+            use_previous_result = False
+
         # Proceed to execute, with server-side SQL validation to avoid executing queries
         query_handler = get_query_handler()
         command_handler = CommandHandler(None, query_handler)
@@ -658,19 +676,47 @@ def confirm_action():
             res = {'type': 'sql_executed', 'results': query_handler.execute_sql(sql)}
         else:
             # Fallback: produce a preview first, validate generated SQL, then execute
-            preview = command_handler.handle_command(command, execute=False, conversation=data.get('conversation'))
-            generated_sql = preview.get('sql')
-            if generated_sql:
-                valid = query_handler.validate_sql_against_schema(generated_sql)
-                if not valid.get('ok'):
-                    analysis = query_handler.analyze_error(generated_sql, f"Validation failed: {valid}")
-                    preview_entry['status'] = 'error'
-                    preview_entry['error'] = f"SQL validation failed: {valid}"
-                    Config.save_query_history(history[:50])
-                    return jsonify({'error': 'Generated SQL validation failed', 'details': valid, 'analysis': analysis}), 400
+            # But if user asked to operate from previous result, reuse it instead of generating SQL
+            if use_previous_result:
+                # find last successful entry with a result
+                prev = None
+                for h in history:
+                    try:
+                        if h.get('status') == 'success' and h.get('result'):
+                            prev = h
+                            break
+                    except Exception:
+                        continue
+                if prev and prev.get('result'):
+                    # re-use the prior result as the response
+                    res = prev.get('result')
+                else:
+                    # no prior result found: fall back to normal preview->execute
+                    preview = command_handler.handle_command(command, execute=False, conversation=data.get('conversation'))
+                    generated_sql = preview.get('sql')
+                    if generated_sql:
+                        valid = query_handler.validate_sql_against_schema(generated_sql)
+                        if not valid.get('ok'):
+                            analysis = query_handler.analyze_error(generated_sql, f"Validation failed: {valid}")
+                            preview_entry['status'] = 'error'
+                            preview_entry['error'] = f"SQL validation failed: {valid}"
+                            Config.save_query_history(history[:50])
+                            return jsonify({'error': 'Generated SQL validation failed', 'details': valid, 'analysis': analysis}), 400
+                    res = command_handler.handle_command(command, execute=True, conversation=data.get('conversation'))
+            else:
+                preview = command_handler.handle_command(command, execute=False, conversation=data.get('conversation'))
+                generated_sql = preview.get('sql')
+                if generated_sql:
+                    valid = query_handler.validate_sql_against_schema(generated_sql)
+                    if not valid.get('ok'):
+                        analysis = query_handler.analyze_error(generated_sql, f"Validation failed: {valid}")
+                        preview_entry['status'] = 'error'
+                        preview_entry['error'] = f"SQL validation failed: {valid}"
+                        Config.save_query_history(history[:50])
+                        return jsonify({'error': 'Generated SQL validation failed', 'details': valid, 'analysis': analysis}), 400
 
-            # Now execute for real
-            res = command_handler.handle_command(command, execute=True, conversation=data.get('conversation'))
+                # Now execute for real
+                res = command_handler.handle_command(command, execute=True, conversation=data.get('conversation'))
 
         # If SQL executed and returned tabular results, attempt to format using the same LLM
         try:
@@ -729,6 +775,29 @@ def confirm_action():
                             formatted = None
                     else:
                         formatted = None
+                    # If the LLM included a presentation hint elsewhere in the response, try to extract it
+                    try:
+                        # try to find any JSON block and parse presentation key
+                        s2 = text.find('{')
+                        e2 = text.rfind('}')
+                        if s2 != -1 and e2 != -1:
+                            block = text[s2:e2+1]
+                            try:
+                                parsed_block = json.loads(block)
+                                if isinstance(parsed_block, dict) and 'presentation' in parsed_block:
+                                    pres = parsed_block.get('presentation')
+                                    if pres:
+                                        if not formatted:
+                                            formatted = {}
+                                        # ensure format is set from hint if not present
+                                        if isinstance(pres, dict):
+                                            if pres.get('display'):
+                                                formatted['format'] = pres.get('display')
+                                            formatted.setdefault('presentation', pres)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                 except Exception as e:
                     logging.warning(f"LLM formatting failed: {e}")
 
@@ -782,7 +851,7 @@ def confirm_action():
                 Config.save_query_history(history[:50])
         except Exception:
             pass
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
 
 @main_routes.route('/execute', methods=['POST'])
 def execute_sql():
@@ -813,7 +882,7 @@ def execute_sql():
         return jsonify(results)
     except Exception as e:
         logging.error(f"Error executing SQL: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
 
 
 
@@ -842,7 +911,7 @@ def list_db_tables():
                 pass
     except Exception as e:
         logging.error(f"Error listing tables: {e}")
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
 
 
 @main_routes.route('/db/table/<string:table_name>/meta', methods=['GET'])
@@ -907,7 +976,7 @@ def table_meta(table_name):
                 pass
     except Exception as e:
         logging.error(f"Error fetching table meta for {table_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
 
 
 @main_routes.route('/db/table/<string:table_name>/rows', methods=['GET'])
@@ -976,7 +1045,7 @@ def table_rows(table_name):
                 pass
     except Exception as e:
         logging.error(f"Error fetching rows for {table_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
 
 
 @main_routes.route('/db/table/<string:table_name>/lookup', methods=['GET'])
@@ -1043,7 +1112,7 @@ def table_lookup(table_name):
                 pass
     except Exception as e:
         logging.error(f"Error in lookup for {table_name}: {e}")
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
 
 @main_routes.route('/query/preview', methods=['POST'])
 def preview_query():
@@ -1057,7 +1126,35 @@ def preview_query():
         return jsonify(preview)
     except Exception as e:
         logging.error(f"Error generating preview: {e}")
-        return jsonify({'error': str(e)}), 500
+    return client_error_response(str(e), e, 500)
+
+
+@main_routes.route('/fix_sql', methods=['POST'])
+def fix_sql():
+    """Attempt to have the LLM analyze a failing SQL statement and propose a corrected SQL."""
+    if not request.is_json:
+        return jsonify({'error': 'Request must be JSON'}), 415
+    payload = request.get_json()
+    sql = payload.get('sql')
+    error = payload.get('error') or payload.get('details') or payload.get('message')
+    question = payload.get('question')
+    if not sql or not error:
+        return jsonify({'error': 'Both sql and error fields are required'}), 400
+    try:
+        qh = get_query_handler()
+        analysis = qh.analyze_error(sql, error)
+        analysis_text = analysis.get('analysis') or str(analysis)
+        fixed_sql = None
+        try:
+            # try to extract SQL from the analysis text
+            fixed_sql = qh.llm_client._extract_sql(analysis_text)
+        except Exception:
+            fixed_sql = None
+
+        return jsonify({'fixed_sql': fixed_sql, 'analysis': analysis_text, 'needs_confirmation': analysis.get('needs_confirmation', True)})
+    except Exception as e:
+        logging.error(f"Error in fix_sql: {e}")
+    return client_error_response(str(e), e, 500)
 
 
 @main_routes.route('/rag/bootstrap', methods=['POST'])
@@ -1244,7 +1341,7 @@ def db_search():
 
     except Exception as e:
         logging.error(f"Error performing DB search: {e}")
-        return jsonify({'error': str(e)}), 500
+        return client_error_response(str(e), e, 500)
 
 @main_routes.route('/members/report', methods=['GET'])
 def get_members_report():
@@ -1321,7 +1418,7 @@ def get_members_report():
         
     except Exception as e:
         logging.error(f"Error generating members report: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return client_error_response(str(e), e, 500)
 
 
 @main_routes.route('/presentation/word', methods=['POST'])

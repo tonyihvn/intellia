@@ -38,7 +38,8 @@ class LLMClient:
         # Set up local model configuration (from config, with sensible defaults)
         local_cfg = Config.LLM_PROVIDERS.get('local', {})
         configured_local_models = local_cfg.get('models', []) if isinstance(local_cfg.get('models', []), list) else []
-        default_local_models = ['codellama', 'llama3', 'deepseek-coder']
+        # Prefer Mistral locally as the first-choice local model after cloud providers
+        default_local_models = ['mistral', 'codellama', 'llama3', 'deepseek-coder']
         # Keep order: configured first then defaults without duplicates
         seen_models = set()
         self.local_models = []
