@@ -1,0 +1,1 @@
+Patch operations: update routes.handle_query caching, update settings_routes handle_examples to accept featured/auto_run, update command.html UI/buttons and client behavior. This file is a note.

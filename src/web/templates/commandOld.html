@@ -1,0 +1,2119 @@
+{% extends "base.html" %}
+
+{% block title %}Intelligent Assistant{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Main Content Styles - full width layout */
+    .main-content {
+        width: 100%;
+        max-width: none;
+        margin: 0;
+    }
+
+    /* Clarifier modal styles */
+    #clarifyModal {
+        position: fixed;
+        z-index: 1100;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    #clarifyModal .clarify-box {
+        background: #fff;
+        max-width: 820px;
+        width: 100%;
+        border-radius: 8px;
+        padding: 18px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    #clarifyModal .clarify-candidates {
+        margin-top: 12px;
+    }
+
+    .command-container {
+        background: #fff;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        width: 100%;
+    }
+
+    .result-item {
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        border-left: 3px solid #007bff;
+        white-space: pre-wrap;
+        /* preserve line breaks while still rendering HTML */
+        word-break: break-word;
+    }
+
+    .result-item strong {
+        color: #495057;
+        margin-right: 0.5rem;
+        font-weight: 600;
+    }
+
+    .formatted-list {
+        margin: 0.75rem 0;
+        padding-left: 2rem;
+        list-style-type: disc;
+    }
+
+    .formatted-list li {
+        margin-bottom: 0.25rem;
+        line-height: 1.5;
+    }
+
+    .result-item a {
+        color: #007bff;
+        text-decoration: none;
+        border-bottom: 1px dotted #007bff;
+    }
+
+    .result-item a:hover {
+        color: #0056b3;
+        border-bottom: 1px solid #0056b3;
+    }
+
+    .result-item p {
+        margin: 0.75rem 0;
+        line-height: 1.6;
+        color: #212529;
+    }
+
+    .result-item pre,
+    .result-item code {
+        white-space: pre-wrap;
+        background: #efefef;
+        padding: 0.5rem;
+        border-radius: 4px;
+        display: block;
+        overflow: auto;
+    }
+
+    .command-input {
+        width: 100%;
+        padding: 10px;
+        margin: 10px 0;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        resize: vertical;
+        min-height: 100px;
+        font-size: 16px;
+    }
+
+    #result {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 5px;
+        background: #f8f9fa;
+        min-height: 100px;
+    }
+
+    .result-table {
+        width: 100%;
+        margin-top: 15px;
+        border-collapse: collapse;
+    }
+
+    .result-table th,
+    .result-table td {
+        padding: 8px;
+        border: 1px solid #dee2e6;
+        text-align: left;
+    }
+
+    .result-table th {
+        background-color: #f8f9fa;
+    }
+
+    .examples {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 5px;
+    }
+
+    .examples h3 {
+        margin-bottom: 10px;
+    }
+
+    /* Sidebar: make history a fixed left sidebar and shift main content to the right */
+    .command-row {
+        position: relative;
+    }
+
+    /* History sidebar fixed on the left beneath the navbar */
+    #historyPanel {
+        position: fixed;
+        left: 0;
+        top: 70px;
+        /* space for navbar */
+        width: 290px;
+        height: calc(100vh - 80px);
+        overflow-y: auto;
+        padding: 5px;
+        background: #ffffff;
+        border-right: 1px solid #e9ecef;
+        box-shadow: 2px 0 6px rgba(0, 0, 0, 0.03);
+        z-index: 1000;
+    }
+
+    /* Shift the command container over so it doesn't hide beneath the fixed sidebar */
+    .command-container {
+        margin-left: 300px;
+        /* sidebar width + gap */
+        width: calc(100% - 300px);
+    }
+
+    /* Ensure panels inside the main flow take full width of the content area */
+    #result,
+    #sqlPanel {
+        width: 100%;
+    }
+
+    /* Visualization controls are shown by default */
+    #chartControls {
+        display: block;
+    }
+
+    /* Responsive: on small screens make sidebar static and stack above content */
+    @media (max-width: 768px) {
+        #historyPanel {
+            position: fixed;
+            left: -100vw;
+            top: 70px;
+            width: 100vw;
+            height: calc(100vh - 80px);
+            box-shadow: 2px 0 6px rgba(0, 0, 0, 0.03);
+            border-right: 1px solid #e9ecef;
+            z-index: 2000;
+            transition: left 0.3s;
+        }
+
+        #historyPanel.expanded {
+            left: 0;
+        }
+
+        .command-container {
+            margin-left: 0;
+            width: 100%;
+        }
+
+        #expandHistoryBtn {
+            display: block;
+        }
+    }
+
+    #expandHistoryBtn {
+        display: none;
+        position: fixed;
+        left: 10px;
+        top: 40px;
+        z-index: 2100;
+        background: #fff;
+        border: 1px solid #e9ecef;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.08);
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5em;
+        cursor: pointer;
+    }
+
+    .example-item {
+        margin-bottom: 8px;
+        cursor: pointer;
+        color: #0066cc;
+    }
+
+    .example-item:hover {
+        text-decoration: underline;
+    }
+
+    .success-message {
+        padding: 10px;
+        margin: 10px 0;
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 4px;
+        color: #155724;
+    }
+
+    .error-message {
+        padding: 10px;
+        margin: 10px 0;
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 4px;
+        color: #721c24;
+    }
+
+    /* Simple chat bubbles above the input */
+    #chatPanel {
+        max-height: 300px;
+        overflow-y: auto;
+        padding: 12px;
+        background: #ffffff;
+        /* border: 1px solid #e9ecef; */
+        border-radius: 8px;
+        margin-bottom: 12px;
+    }
+
+    .chat-bubble {
+        padding: 8px 12px;
+        border-radius: 14px;
+        margin: 6px 0;
+        display: inline-block;
+        max-width: 85%;
+    }
+
+    .chat-user {
+        background: #d1e7ff;
+        align-self: flex-end;
+    }
+
+    .chat-assistant {
+        background: #f1f3f5;
+    }
+
+    .chat-row {
+        display: flex;
+    }
+
+    .chat-row.user {
+        justify-content: flex-end;
+    }
+
+    .chat-row.assistant {
+        justify-content: flex-start;
+    }
+
+    #generatedSQL {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 5px;
+    }
+
+    #sqlEditor {
+        width: 100%;
+        font-family: monospace;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+
+    /* History item styles: don't bold, delete button hidden until hover */
+    .history-item {
+        padding: 8px 6px;
+        border-bottom: 1px solid #f1f1f1;
+        cursor: pointer;
+    }
+
+    .history-item .item-title {
+        font-weight: 400;
+        /* normal weight */
+    }
+
+    .history-item .delete-btn {
+        opacity: 0;
+        transition: opacity 0.15s ease-in-out;
+    }
+
+    .history-item:hover .delete-btn {
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="command-container">
+
+
+        <!-- Chat panel: shows user messages and assistant replies above the input -->
+        <div class="mb-3">
+            <div id="chatPanel" aria-live="polite" aria-atomic="false">
+                <!-- Chat bubbles will be appended here -->
+                <div class="text-muted"></div>
+            </div>
+
+            <label for="commandInput" class="form-label"><b>What would you like to do?</b></label>
+            <small class="text-muted"><i>Ask questions, schedule tasks, or take immediate actions</i></small>
+            <textarea class="command-input" id="commandInput" rows="4" placeholder="Examples:
+- Show me all details of the last record in a named table
+- Send an email to admin@example.com now with subject 'Daily Report'
+- Every Monday at 9am, send an email to team@example.com about weekly statistics
+- Call API POST https://example.com/api/update now with body {'status': 'active'}"></textarea>
+        </div>
+
+        <div class="button-group mb-4">
+            <button id="submitBtn" class="btn btn-primary">
+                <i class="fas fa-paper-plane"></i> Go
+            </button>
+            <button id="micBtn" class="btn btn-outline-secondary ms-2" title="Speak your command">
+                <i class="fas fa-microphone"></i>
+            </button>
+        </div>
+
+        <div class="row command-row">
+            <!-- History on the LEFT -->
+            <div class="col-md-4">
+                <button id="expandHistoryBtn" title="Show History" aria-label="Show History">
+                    <i class="fas fa-history"></i>
+                </button>
+                <div id="historyPanel" class="mb-3">
+                    <button id="newChatBtn" class="btn btn-sm btn-primary mb-2" style="width:100%">+ New
+                        Activity</button>
+                    <h5 id="historyHeader" style="cursor:pointer">History</h5>
+                    <hr>
+                    <div id="historyList">Click "History" to load</div>
+                    <div class="mt-2">
+                        <button id="clearAllHistoryBtn" class="btn btn-sm btn-outline-danger">Clear All History</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat / Results on the RIGHT -->
+            <div class="col-md-12">
+                <!-- SQL editor row (always visible) -->
+                <div id="sqlPanel" class="mt-3">
+                    <!-- <div class="d-flex justify-content-between align-items-center"> -->
+
+                    <div class="mt-2">
+                        <button id="confirmBtn" class="btn btn-success" disabled>Confirm (Execute)</button>
+                        <!-- <button id="toggleResultBtn" class="btn btn-sm btn-outline-secondary ms-2">Show Results</button> -->
+                        <div id="confirmResult" class="mt-2" style="position: relative; overflow: scroll !important;">
+                        </div>
+                    </div>
+                    <textarea id="sqlEditor" style="width:100%; min-height:50px; display:none;"
+                        class="mt-2 form-control" placeholder="Generated SQL will appear here"></textarea>
+                    <div id="chartControls">
+                        <div class="mb-2">
+                            <button id="toggleSql" class="btn btn-sm btn-outline-secondary me-2"
+                                style="display:inline-block">Show SQL</button>
+                            <button id="executeRawBtn" class="btn btn-sm btn-outline-primary"
+                                style="display:inline-block">Execute Raw SQL</button>
+                        </div>
+                        <div class="mt-2">
+                            <label for="chartTypeSelect" class="form-label small">Chart type:</label>
+                            <select id="chartTypeSelect" class="form-select form-select-sm"
+                                style="display:inline-block; width:auto; margin-right:6px">
+                                <option value="bar">Bar</option>
+                                <option value="line">Line</option>
+                                <option value="pie">Pie</option>
+                                <option value="area">Area</option>
+                            </select>
+                            <button id="showChartBtn" class="btn btn-sm btn-outline-info">Show Chart</button>
+                            <button id="exportWordBtn" class="btn btn-sm btn-outline-secondary">Export to Word</button>
+                            <button id="compressSummaryBtn" class="btn btn-sm btn-outline-primary">Compressed
+                                Summary</button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        <!-- Clarifier modal: shown when RAG needs table selection -->
+        <div id="clarifyModal">
+            <div class="clarify-box">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h5 class="mb-0">Which table should we use?</h5>
+                    <button type="button" class="btn-close" aria-label="Close" onclick="hideClarifyModal()"></button>
+                </div>
+                <div class="clarify-info small text-muted mt-2">Select the most relevant table.</div>
+                <div class="clarify-candidates mt-3"></div>
+            </div>
+        </div>
+
+        <div class="examples">
+            <h3>Featured Commands</h3>
+            <div id="examplesList">
+                <!-- Dynamically populated from settings (/api/settings/examples) -->
+                <div class="text-muted">Loading examples...</div>
+            </div>
+        </div>
+        <hr>
+        <!-- Database-wide search panel (collapsed by default) -->
+        <div class="d-flex justify-content-between align-items-center">
+
+            <button id="toggleDbSearch" class="btn btn-sm btn-outline-secondary">Search Local Database</button>
+        </div>
+        <div class="mt-4 p-3" id="dbSearchPanel"
+            style="background:#fff; border-radius:6px; box-shadow:0 0 6px rgba(0,0,0,0.03); display:none;">
+            <h6 style="margin:0">Search Local database</h6>
+            <div class="mb-2">
+                <input id="dbSearchInput" class="form-control"
+                    placeholder="Search database for text (e.g. 'pregnancy')" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label small">Tables to search (check to include). Use the 'Select all' checkbox to
+                    toggle all.</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="dbSelectAll" />
+                    <label class="form-check-label" for="dbSelectAll">Select all</label>
+                </div>
+                <div id="dbTablesList"
+                    style="max-height:200px; overflow:auto; border:1px solid #eee; padding:8px; border-radius:4px">
+                </div>
+            </div>
+            <div>
+                <button id="dbSearchBtn" class="btn btn-outline-primary">Search DB</button>
+                <button id="dbClearBtn" class="btn btn-sm btn-outline-secondary">Clear</button>
+            </div>
+            <div id="dbSearchResults" class="mt-3"></div>
+        </div>
+        <!-- Modal for showing a full row from DB search -->
+        <div class="modal fade" id="dbRowModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="dbRowModalTitle">Row</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="dbRowModalBody">
+                        <!-- Full row content will be injected here -->
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- jQuery (required by DataTables) -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<!-- DataTables CSS/JS and Buttons for Excel export -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" />
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/keytable/2.8.0/js/dataTables.keyTable.min.js"></script>
+<script>
+    // Load schema knowledge and business rules into collapsible lists
+    async function loadKnowledgeLists() {
+        try {
+            const resp = await fetch('/api/rag/knowledge');
+            if (!resp.ok) throw new Error('Failed to load knowledge');
+            const data = await resp.json();
+            // Schema Knowledge
+            const schemaList = document.getElementById('schemaKnowledgeList');
+            if (schemaList) {
+                if (data.schema && data.schema.length > 0) {
+                    schemaList.innerHTML = data.schema.map(item => `<div class='small mb-2' style='border-bottom:1px solid #eee;'>${escapeHtml(item.text)}</div>`).join('');
+                } else {
+                    schemaList.innerHTML = '<div class="text-muted">No schema knowledge added yet.</div>';
+                }
+            }
+            // Business Rules
+            const rulesList = document.getElementById('businessRulesList');
+            if (rulesList) {
+                if (data.business_rules && data.business_rules.length > 0) {
+                    rulesList.innerHTML = data.business_rules.map(item => `<div class='small mb-2' style='border-bottom:1px solid #eee;'>${escapeHtml(item.text)}</div>`).join('');
+                } else {
+                    rulesList.innerHTML = '<div class="text-muted">No business rules added yet.</div>';
+                }
+            }
+        } catch (e) {
+            const schemaList = document.getElementById('schemaKnowledgeList');
+            if (schemaList) schemaList.innerHTML = '<div class="text-danger">Failed to load schema knowledge</div>';
+            const rulesList = document.getElementById('businessRulesList');
+            if (rulesList) rulesList.innerHTML = '<div class="text-danger">Failed to load business rules</div>';
+        }
+    }
+    document.addEventListener('DOMContentLoaded', loadKnowledgeLists);
+    // Mobile sidebar expand/collapse logic
+    function isMobile() {
+        return window.innerWidth <= 768;
+    }
+    const historyPanel = document.getElementById('historyPanel');
+    const expandBtn = document.getElementById('expandHistoryBtn');
+    function showHistorySidebar() {
+        if (isMobile()) {
+            historyPanel.classList.add('expanded');
+            expandBtn.style.display = 'none';
+        }
+    }
+    function hideHistorySidebar() {
+        if (isMobile()) {
+            historyPanel.classList.remove('expanded');
+            expandBtn.style.display = 'block';
+        }
+    }
+    if (expandBtn) {
+        expandBtn.addEventListener('click', showHistorySidebar);
+    }
+    // Collapse sidebar immediately when a history item is clicked
+    document.addEventListener('DOMContentLoaded', () => {
+        if (isMobile()) {
+            hideHistorySidebar();
+        }
+        // Attach collapse logic to history items after loadHistory runs
+        const origLoadHistory = window.loadHistory;
+        window.loadHistory = async function () {
+            await origLoadHistory();
+            // Attach click handler to collapse sidebar
+            const items = document.querySelectorAll('.history-item');
+            items.forEach(item => {
+                item.addEventListener('click', hideHistorySidebar);
+            });
+        };
+    });
+    // track if user has clicked Go (unlocked panels)
+    window.goClicked = false;
+    // maintain an in-memory chat history (sent to server for context)
+    window.chatHistory = [];
+
+    document.getElementById('submitBtn').addEventListener('click', async () => {
+        const command = document.getElementById('commandInput').value.trim();
+        if (!command) {
+            alert('Please enter a command.');
+            return;
+        }
+
+        const chatPanel = document.getElementById('chatPanel');
+        const appendChat = (role, text, actionDetails) => {
+            try {
+                const row = document.createElement('div');
+                row.className = 'chat-row ' + (role === 'user' ? 'user' : 'assistant');
+                const bubble = document.createElement('div');
+                bubble.className = 'chat-bubble ' + (role === 'user' ? 'chat-user' : 'chat-assistant');
+                let fullText = text;
+                if (role === 'assistant' && actionDetails) {
+                    fullText += `<div class="action-details-summary" style="margin: 6px 0 0 0; font-size: 0.95em; color: #0d6efd; background: #e9f5ff; border-radius: 8px; padding: 6px 10px;"><b>Action to be taken on Confirm:</b> <br>${actionDetails}</div>`;
+                }
+                bubble.innerHTML = fullText;
+                row.appendChild(bubble);
+                chatPanel.appendChild(row);
+                // store in history for subsequent requests, including action details for assistant
+                try {
+                    if (role === 'assistant' && actionDetails) {
+                        window.chatHistory.push({ role: role, text: text, action_details: actionDetails });
+                    } else {
+                        window.chatHistory.push({ role: role, text: text });
+                    }
+                } catch (e) { }
+                chatPanel.scrollTop = chatPanel.scrollHeight;
+            } catch (e) { console.warn('appendChat error', e); }
+        };
+
+        // Immediately show the user's message in the chat panel and record it
+        appendChat('user', command);
+
+        const button = document.getElementById('submitBtn');
+        const originalText = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+        try {
+            const response = await fetch('/api/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: command, conversation: window.chatHistory.slice(-50) })
+            });
+
+            const data = await response.json();
+            window.latestPreview = data;
+
+            // Update visualization controls visibility depending on returned data
+            try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
+
+            // Panels are always visible now
+            window.goClicked = true;
+
+            // Render assistant response in chat and keep SQL editor populated if present.
+            try {
+                // Always show all explanations, reasoning, and business rules in the chat only
+                if (data.type === 'chat_response') {
+                    appendChat('assistant', data.response || '');
+                    // Only put SQL in the editor if present and ONLY if it's a valid SQL string
+                    if (data.sql && typeof data.sql === 'string') {
+                        document.getElementById('sqlEditor').value = data.sql;
+                    } else {
+                        document.getElementById('sqlEditor').value = '';
+                    }
+                } else if (data.type === 'clarify') {
+                    // Show clarifier modal and a short assistant prompt
+                    try { appendChat('assistant', data.prompt || 'Please select which table(s) to use.'); } catch (e) { }
+                    showClarifyModal(data.candidates || [], command);
+                } else if (data.type === 'query_preview' || data.type === 'action_preview') {
+                    // Show all explanations, business rules, and reasoning in the chat
+                    const assistantText = [
+                        data.explanation,
+                        data.sql_explanation,
+                        data.planned_action
+                    ].filter(Boolean).join('<br>');
+                    // Compose a detailed action summary for the user
+                    let actionSummary = '';
+                    if (data.action_details) {
+                        actionSummary = data.action_details;
+                    } else if (data.sql) {
+                        actionSummary = `The following SQL will be executed: <pre>${escapeHtml(data.sql)}</pre>`;
+                    } else if (data.planned_action) {
+                        actionSummary = data.planned_action;
+                    } else if (data.explanation) {
+                        actionSummary = data.explanation;
+                    } else {
+                        actionSummary = 'A database or API action will be performed.';
+                    }
+                    appendChat('assistant', assistantText, actionSummary);
+                    // Only put SQL in the editor if present and ONLY if it's a valid SQL string
+                    if (data.sql && typeof data.sql === 'string') {
+                        document.getElementById('sqlEditor').value = data.sql;
+                    } else {
+                        document.getElementById('sqlEditor').value = '';
+                    }
+                    // if there was a validation error, show as error in result
+                    if (data.error) {
+                        displayError('SQL validation: ' + data.error);
+                    }
+                } else {
+                    // For results or other responses, show a short assistant note
+                    const note = data.explanation || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
+                    appendChat('assistant', note || 'Result returned.');
+                }
+            } catch (e) { console.warn('chat render error', e); }
+
+            // Update visualization controls visibility in this path too
+            try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
+
+            // Do not show result area until confirm is clicked
+            document.getElementById('result').style.display = 'none';
+
+            // Show a short toast for immediate action results (send email, call api, etc.)
+            try {
+                if (data && data.type === 'action_completed') {
+                    displaySuccess(data.message || ('Action "' + (data.action || '') + '" completed'));
+                } else if (data && data.type === 'action_failed') {
+                    displayError(data.error || 'Action failed');
+                }
+            } catch (e) {
+                console.warn('action toast render error', e);
+            }
+
+        } catch (error) {
+            console.error('Error:', error);
+            displayError('Error processing your command. Please try again.');
+            appendChat('assistant', 'Error processing your command.');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    });
+
+    // Populate example commands from settings
+    async function loadExamples() {
+        const list = document.getElementById('examplesList');
+        try {
+            const resp = await fetch('/api/settings/examples');
+            if (!resp.ok) {
+                let errText = await resp.text().catch(() => resp.statusText || 'Failed');
+                list.innerHTML = `<div class="text-danger">Failed to load examples: ${escapeHtml(errText)}</div><div class="mt-2"><button id="retryExamples" class="btn btn-sm btn-outline-secondary">Retry</button></div>`;
+                const retry = document.getElementById('retryExamples');
+                if (retry) retry.addEventListener('click', loadExamples);
+                return;
+            }
+            const data = await resp.json();
+            const examples = (data && data.examples) ? data.examples : [];
+            list.innerHTML = '';
+            if (!examples || examples.length === 0) {
+                list.innerHTML = '<div class="text-muted">No examples defined in settings. Add some in Settings → Training Data or Examples.</div>';
+                return;
+            }
+            examples.forEach(ex => {
+                const div = document.createElement('div');
+                div.className = 'example-item';
+                div.textContent = '➤ ' + ex;
+                div.addEventListener('click', () => setCommand(ex));
+                list.appendChild(div);
+            });
+        } catch (e) {
+            console.error('Failed to load examples', e);
+            list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
+        }
+    }
+
+    // Toggle DB Search panel
+    document.addEventListener('DOMContentLoaded', () => {
+        const dbPanel = document.getElementById('dbSearchPanel');
+        const toggleDb = document.getElementById('toggleDbSearch');
+        if (toggleDb && dbPanel) {
+            toggleDb.addEventListener('click', () => {
+                if (dbPanel.style.display === 'none' || dbPanel.style.display === '') {
+                    dbPanel.style.display = 'block';
+                    toggleDb.textContent = 'Hide';
+                } else {
+                    dbPanel.style.display = 'none';
+                    toggleDb.textContent = 'Show';
+                }
+            });
+        }
+
+        // Toggle results area
+        const toggleRes = document.getElementById('toggleResultBtn');
+        const resultDiv = document.getElementById('result');
+        if (toggleRes && resultDiv) {
+            toggleRes.addEventListener('click', () => {
+                if (resultDiv.style.display === 'none' || resultDiv.style.display === '') {
+                    resultDiv.style.display = 'block';
+                    toggleRes.textContent = 'Hide Results';
+                } else {
+                    resultDiv.style.display = 'none';
+                    toggleRes.textContent = 'Show Results';
+                }
+            });
+        }
+
+        // Load examples into UI
+        loadExamples();
+        // Initialize microphone speech-to-text
+        initSpeechToText();
+    });
+
+    // Speech to Text (Microphone) using Web Speech API
+    function initSpeechToText() {
+        const micBtn = document.getElementById('micBtn');
+        const input = document.getElementById('commandInput');
+        if (!micBtn || !input) return;
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            micBtn.style.display = 'none';
+            return;
+        }
+
+        let recog = null;
+        let listening = false;
+
+        function startRecognition() {
+            recog = new SpeechRecognition();
+            recog.lang = navigator.language || 'en-US';
+            recog.interimResults = true;
+            recog.maxAlternatives = 1;
+
+            let finalTranscript = '';
+            micBtn.classList.add('btn-danger');
+            micBtn.classList.remove('btn-outline-secondary');
+            micBtn.title = 'Listening... Click to stop';
+
+            recog.onresult = (event) => {
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const r = event.results[i];
+                    if (r.isFinal) finalTranscript += r[0].transcript;
+                    else interim += r[0].transcript;
+                }
+                input.value = (finalTranscript + ' ' + interim).trim();
+            };
+
+            recog.onerror = (e) => {
+                console.error('Speech recognition error', e);
+                stopRecognition();
+                alert('Speech recognition error: ' + (e.error || 'unknown'));
+            };
+
+            recog.onend = () => {
+                stopRecognition();
+            };
+
+            recog.start();
+            listening = true;
+        }
+
+        function stopRecognition() {
+            if (recog) {
+                try { recog.stop(); } catch (e) { }
+                recog = null;
+            }
+            listening = false;
+            micBtn.classList.remove('btn-danger');
+            micBtn.classList.add('btn-outline-secondary');
+            micBtn.title = 'Speak your command';
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (!listening) startRecognition(); else stopRecognition();
+        });
+    }
+
+    // SQL collapse toggle handler. Editor is collapsed by default; user expands it.
+    document.getElementById('toggleSql').addEventListener('click', () => {
+        const editor = document.getElementById('sqlEditor');
+        const btn = document.getElementById('toggleSql');
+        if (!editor) return;
+        if (editor.style.display === 'none' || editor.style.display === '') {
+            editor.style.display = 'block';
+            btn.textContent = 'Collapse SQL';
+        } else {
+            editor.style.display = 'none';
+            btn.textContent = 'Show SQL';
+        }
+    });
+
+
+    // Enable Confirm button if there is SQL in the editor
+    const sqlEditor = document.getElementById('sqlEditor');
+    const confirmBtn = document.getElementById('confirmBtn');
+    function updateConfirmBtnState() {
+        // Enable Confirm for any actionable preview: SQL, send mail, schedule, read website, etc.
+        let enable = false;
+        const sqlVal = sqlEditor.value && sqlEditor.value.trim();
+        if (sqlVal) enable = true;
+        if (window.latestPreview) {
+            const type = window.latestPreview.type;
+            // Enable for any actionable type
+            if ([
+                'action_preview',
+                'query_preview',
+                'action_completed',
+                'action_failed',
+                'read_webpage',
+                'send_email',
+                'schedule_task',
+                'call_api',
+                'sql_executed',
+                'query_result'
+            ].includes(type)) {
+                enable = true;
+            }
+        }
+        confirmBtn.disabled = !enable;
+    }
+    sqlEditor.addEventListener('input', updateConfirmBtnState);
+    updateConfirmBtnState();
+
+    document.getElementById('confirmBtn').addEventListener('click', async () => {
+        // Support both SQL and non-SQL actions (like send_email)
+        const preview = window.latestPreview || {};
+        const historyId = preview._history_id || preview.history_id || null;
+        const editedSql = document.getElementById('sqlEditor').value;
+        const commandText = document.getElementById('commandInput').value;
+        let payload = { command: commandText };
+        if (historyId) payload.history_id = historyId;
+
+        // If this is an action (like send_email), send the action object; otherwise, send SQL
+        if (preview && preview.type && preview.type.startsWith('action') && preview.action) {
+            payload.action = preview.action;
+            // Only include SQL if present and not empty
+            if (editedSql && editedSql.trim()) payload.sql = editedSql.trim();
+        } else {
+            // For SQL or query actions, require SQL
+            if (!editedSql || !editedSql.trim()) {
+                alert('Please enter SQL to execute.');
+                return;
+            }
+            payload.sql = editedSql.trim();
+        }
+
+        try {
+            const confirmResultEl = document.getElementById('confirmResult');
+            confirmResultEl.innerHTML = `<div class="alert alert-info">Generating result — this may take a few seconds...</div>`;
+            const confirmBtnEl = document.getElementById('confirmBtn');
+            if (confirmBtnEl) confirmBtnEl.disabled = true;
+
+            const resp = await fetch('/api/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const res = await resp.json();
+            // clear temporary message and re-enable
+            confirmResultEl.innerHTML = '';
+            if (confirmBtnEl) confirmBtnEl.disabled = false;
+            if (res.error) {
+                // show inline error below confirm button
+                confirmResultEl.innerHTML = `<div class="error-message">${escapeHtml(res.error || 'Execution error')}</div>`;
+            } else {
+                // Render formatted payload if present, otherwise show a short success / result summary
+                if (res.formatted && (res.formatted.content || res.formatted.content_type)) {
+                    try {
+                        if (res.formatted.content_type === 'text/html' || res.formatted.format === 'tabular') {
+                            confirmResultEl.innerHTML = res.formatted.content || '';
+                            try { enhanceTablesIn(confirmResultEl); } catch (e) { console.warn('enhanceTablesIn error', e); }
+                        } else if (res.formatted.format === 'csv' || res.formatted.content_type === 'text/csv') {
+                            confirmResultEl.innerHTML = `<pre>${escapeHtml(res.formatted.content || '')}</pre><a class='btn btn-sm btn-primary mt-2' href='data:text/csv;charset=utf-8,${encodeURIComponent(res.formatted.content || "")}' download='results.csv'>Download CSV</a>`;
+                        } else if (res.formatted.format === 'chart') {
+                            // For simplicity, show JSON descriptor and let user view full results in main area
+                            confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res.formatted.content || {}, null, 2))}</pre>`;
+                        } else if (res.formatted.content && (res.formatted.format === 'pdf' || res.formatted.format === 'image' || res.formatted.format === 'excel')) {
+                            // Provide a download link for base64 content
+                            const b64 = res.formatted.content;
+                            const filename = res.formatted.filename || ('results.' + (res.formatted.format === 'pdf' ? 'pdf' : 'bin'));
+                            confirmResultEl.innerHTML = `<a class='btn btn-sm btn-primary' download='${escapeHtml(filename)}' href='data:${escapeHtml(res.formatted.content_type || 'application/octet-stream')};base64,${escapeHtml(b64)}'>Download ${escapeHtml(filename)}</a>`;
+                        } else {
+                            // fallback to stringified result
+                            confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
+                        }
+                    } catch (e) {
+                        console.error('Error rendering confirm formatted result', e);
+                        confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
+                    }
+                } else {
+                    // No formatted payload provided — show brief structured result
+                    if (res.results) {
+                        // Do NOT auto-render tables. Show an explicit button to display results.
+                        const rows = Array.isArray(res.results) ? res.results : [];
+                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Query executed successfully. ${rows.length} rows available.</div>`;
+                        if (rows.length > 0) {
+                            const btn = document.createElement('button');
+                            btn.className = 'btn btn-sm btn-outline-primary';
+                            btn.textContent = `Show ${Math.min(100, rows.length)} rows as table`;
+                            btn.addEventListener('click', () => {
+                                // Render up to 100 rows when user explicitly requests
+                                const toShow = rows.slice(0, 100);
+                                const container = document.createElement('div');
+                                displayTable(toShow, container);
+                                confirmResultEl.appendChild(container);
+                            });
+                            confirmResultEl.appendChild(btn);
+                        }
+                    } else {
+                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Action executed successfully.</div>`;
+                    }
+                }
+
+                // Also update main result area and refresh history
+                displayResult(res);
+                // If this was a confirmed action, clear the pending preview state and restore history
+                try {
+                    window.pendingConfirmation = false;
+                    const historyPane = document.getElementById('historyList');
+                    if (historyPane) historyPane.style.display = historyPane.dataset._wasVisible === '1' ? 'block' : '';
+                    const previewBanner = document.getElementById('previewBanner');
+                    if (previewBanner) previewBanner.style.display = 'none';
+                } catch (e) { console.warn('restore history UI error', e); }
+                loadHistory();
+            }
+        } catch (e) {
+            console.error(e);
+            displayError('Failed to confirm action.');
+        }
+    });
+
+    document.getElementById('executeRawBtn').addEventListener('click', async () => {
+        const sql = document.getElementById('sqlEditor').value;
+        if (!sql) { alert('No SQL to execute'); return; }
+        const ok = confirm('Execute raw SQL now? This will run the SQL against the database. Proceed?');
+        if (!ok) return;
+        try {
+            const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+            const data = await resp.json();
+            if (data.error) {
+                displayError(data.error);
+            } else {
+                displayResult({ type: 'query_result', sql, results: data });
+            }
+        } catch (e) {
+            console.error(e);
+            displayError('Failed to execute SQL');
+        }
+    });
+
+    // Enhanced: Always draw a chart if the user requested a chart, even if backend did not return chart format
+    function displayResult(data) {
+        const resultDiv = document.getElementById('confirmResult');
+        resultDiv.innerHTML = '';
+        if (!data) return;
+        if (data.error) {
+            displayError(data.error);
+            return;
+        }
+
+        // Always put SQL into the editor if present
+        const editor = document.getElementById('sqlEditor');
+        if (data.sql) {
+            editor.value = data.sql;
+        }
+
+        // View mode toggles
+        let tabularData = null;
+        if (data.formatted && (data.formatted.format === 'tabular' || data.formatted.content_type === 'text/html') && data.formatted.content) {
+            // Try to extract data from HTML table
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = data.formatted.content;
+            const table = tempDiv.querySelector('table');
+            if (table) {
+                const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+                const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+                    const cells = Array.from(tr.querySelectorAll('td'));
+                    const obj = {};
+                    cells.forEach((td, i) => {
+                        obj[headers[i] || `col${i}`] = isNaN(td.textContent.trim()) ? td.textContent.trim() : Number(td.textContent.trim());
+                    });
+                    return obj;
+                });
+                if (rows.length > 0) tabularData = rows;
+            }
+        } else if (Array.isArray(data.results) && data.results.length > 0) {
+            tabularData = data.results;
+        } else if (Array.isArray(data.data) && data.data.length > 0) {
+            tabularData = data.data;
+        }
+
+        // If tabular data is available, do NOT auto-render table/chart/analysis.
+        // Instead show explicit buttons the user must click to render each view.
+        if (tabularData && tabularData.length > 0) {
+            const info = document.createElement('div');
+            info.className = 'mb-2';
+            info.innerHTML = `<div class='alert alert-info'>${tabularData.length} rows available. Click a view to render.</div>`;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group mb-2';
+            const tableBtn = document.createElement('button');
+            tableBtn.className = 'btn btn-sm btn-outline-primary';
+            tableBtn.textContent = 'Show Table';
+            const chartBtn = document.createElement('button');
+            chartBtn.className = 'btn btn-sm btn-outline-primary';
+            chartBtn.textContent = 'Show Chart';
+            const analysisBtn = document.createElement('button');
+            analysisBtn.className = 'btn btn-sm btn-outline-primary';
+            analysisBtn.textContent = 'Show Analysis';
+            btnGroup.appendChild(tableBtn);
+            btnGroup.appendChild(chartBtn);
+            btnGroup.appendChild(analysisBtn);
+            resultDiv.appendChild(info);
+            resultDiv.appendChild(btnGroup);
+
+            // Containers are created lazily when requested
+            let tableRendered = false, chartRendered = false, analysisRendered = false;
+            tableBtn.addEventListener('click', () => {
+                if (tableRendered) return;
+                const tableContainer = document.createElement('div');
+                resultDiv.appendChild(tableContainer);
+                displayTable(tabularData, tableContainer);
+                tableRendered = true;
+            });
+            chartBtn.addEventListener('click', () => {
+                if (chartRendered) return;
+                const chartContainer = document.createElement('div');
+                resultDiv.appendChild(chartContainer);
+                // Create a simple bar chart if numeric column exists
+                const keys = Object.keys(tabularData[0]);
+                const labelKey = keys[0];
+                const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                const canvas = document.createElement('canvas');
+                canvas.style.maxHeight = '400px';
+                chartContainer.appendChild(canvas);
+                new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: tabularData.map(row => row[labelKey]),
+                        datasets: [{ label: valueKey, data: tabularData.map(row => row[valueKey]), backgroundColor: '#3498db' }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                chartRendered = true;
+            });
+            analysisBtn.addEventListener('click', () => {
+                if (analysisRendered) return;
+                const analysisContainer = document.createElement('div');
+                resultDiv.appendChild(analysisContainer);
+                // Simple analysis summary
+                let summary = `<b>Analysis & Comparisons:</b><br>`;
+                summary += `Rows: ${tabularData.length}<br>`;
+                const keys = Object.keys(tabularData[0]);
+                const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                if (valueKey) {
+                    const values = tabularData.map(row => Number(row[valueKey])).filter(v => !isNaN(v));
+                    if (values.length > 0) {
+                        const min = Math.min(...values);
+                        const max = Math.max(...values);
+                        const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
+                        summary += `Min ${valueKey}: ${min}<br>Max ${valueKey}: ${max}<br>Avg ${valueKey}: ${avg}<br>`;
+                    }
+                }
+                analysisContainer.innerHTML = summary;
+                analysisRendered = true;
+            });
+            return;
+        }
+
+        // Fallback: show table or text as before
+        if (data.formatted && (data.formatted.content_type === 'text/html' || data.formatted.format === 'tabular')) {
+            resultDiv.innerHTML = data.formatted.content || '';
+            try { enhanceTablesIn(resultDiv); } catch (e) { console.warn('enhanceTablesIn error', e); }
+            return;
+        }
+        if (Array.isArray(data.results) && data.results.length > 0) {
+            displayData(data.results);
+            return;
+        }
+        if (Array.isArray(data.data) && data.data.length > 0) {
+            displayData(data.data);
+            return;
+        }
+        if (data.response) {
+            displayTextResult(data.response);
+            return;
+        }
+        displayTextResult(data);
+    }
+
+    function displayData(data) {
+        // Do not auto-render table/chart/analysis. Provide explicit buttons to the user.
+        const resultDiv = document.getElementById('result');
+        resultDiv.innerHTML = '';
+        if (!data) return;
+        if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
+            const info = document.createElement('div');
+            info.className = 'mb-2';
+            info.innerHTML = `<div class='alert alert-info'>${data.length} rows available. Click a view to render.</div>`;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group mb-2';
+            const tableBtn = document.createElement('button');
+            tableBtn.className = 'btn btn-sm btn-outline-primary';
+            tableBtn.textContent = 'Show Table';
+            const chartBtn = document.createElement('button');
+            chartBtn.className = 'btn btn-sm btn-outline-primary';
+            chartBtn.textContent = 'Show Chart';
+            btnGroup.appendChild(tableBtn);
+            btnGroup.appendChild(chartBtn);
+            resultDiv.appendChild(info);
+            resultDiv.appendChild(btnGroup);
+
+            tableBtn.addEventListener('click', () => displayTable(data));
+            chartBtn.addEventListener('click', () => displayChart(data));
+            return;
+        }
+
+        // For other types, show as text
+        displayTextResult(data);
+    }
+
+    function displayChart(data) {
+        const resultDiv = document.getElementById('result');
+        const canvas = document.createElement('canvas');
+        canvas.id = 'resultChart';
+        canvas.style.maxHeight = '400px';
+        resultDiv.appendChild(canvas);
+
+        const keys = Object.keys(data[0]);
+        const labelKey = keys[0];
+        const valueKey = keys.find(k => typeof data[0][k] === 'number') || keys[1];
+
+        new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: data.map(row => row[labelKey]),
+                datasets: [{
+                    label: valueKey,
+                    data: data.map(row => row[valueKey]),
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false
+            }
+        });
+    }
+
+    function displayTable(data) {
+        // Accept optional container for rendering
+        let container = arguments.length > 1 ? arguments[1] : document.getElementById('result');
+        const table = document.createElement('table');
+        table.className = 'table table-sm table-striped generated-datatable';
+
+        // Create header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        const headerKeys = Object.keys(data[0]);
+        headerKeys.forEach(key => {
+            const th = document.createElement('th');
+            th.textContent = key;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        // Create body
+        const tbody = document.createElement('tbody');
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            headerKeys.forEach(key => {
+                const td = document.createElement('td');
+                td.textContent = row[key] === null || row[key] === undefined ? '' : row[key];
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        container.appendChild(table);
+        try { enhanceTablesIn(container); } catch (e) { console.warn('enhanceTablesIn error', e); }
+    }
+
+    // Initialize DataTables on any tables inside the given container.
+    function enhanceTablesIn(container) {
+        try {
+            if (window.jQuery && $.fn && $.fn.dataTable) {
+                $(container).find('table').each(function () {
+                    try {
+                        if ($.fn.dataTable.isDataTable(this)) {
+                            $(this).DataTable().draw(false);
+                        } else {
+                            $(this).DataTable({
+                                pageLength: 10,
+                                lengthChange: true,
+                                searching: true,
+                                ordering: true,
+                                paging: true,
+                                dom: 'Bfrtip',
+                                buttons: [
+                                    { extend: 'excelHtml5', text: 'Export to Excel' }
+                                ],
+                                keys: true
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('DataTable init failed for one table', e);
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('enhanceTablesIn failed', e);
+        }
+    }
+
+    function sanitizeAndFormat(content) {
+        // Allow a small whitelist of tags and attributes and remove anything else.
+        const allowedTags = new Set(['b', 'i', 'strong', 'em', 'p', 'ul', 'ol', 'li', 'br', 'a', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5']);
+
+        function sanitizeHtml(input) {
+            // Parse the HTML and rebuild only allowed nodes/attributes
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(input, 'text/html');
+
+            function walk(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    return document.createTextNode(node.textContent);
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) {
+                    return document.createDocumentFragment();
+                }
+                const tag = node.tagName.toLowerCase();
+                if (!allowedTags.has(tag)) {
+                    // Replace disallowed element with its children (no tag)
+                    const frag = document.createDocumentFragment();
+                    node.childNodes.forEach(child => frag.appendChild(walk(child)));
+                    return frag;
+                }
+
+                const el = document.createElement(tag);
+                // Allowed attributes: only href/title/target for <a>
+                if (tag === 'a') {
+                    const href = node.getAttribute('href');
+                    if (href && /^(https?:\/\/|mailto:|\/)/i.test(href)) {
+                        el.setAttribute('href', href);
+                        el.setAttribute('target', '_blank');
+                        el.setAttribute('rel', 'noopener noreferrer');
+                    }
+                }
+
+                // Recurse children
+                node.childNodes.forEach(child => el.appendChild(walk(child)));
+                return el;
+            }
+
+            const container = document.createElement('div');
+            doc.body.childNodes.forEach(child => container.appendChild(walk(child)));
+            return container.innerHTML;
+        }
+
+        // If the input contains HTML tags, sanitize and return
+        if (/<[^>]+>/.test(content)) {
+            return sanitizeHtml(content);
+        }
+
+        // Otherwise treat as plain text: escape and format simple things (URLs, markdown links, lists, paragraphs)
+        function escapeHtml(s) {
+            return s.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        let out = escapeHtml(content || '');
+
+        // Markdown links [text](url)
+        out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+            const safeUrl = escapeHtml(url);
+            const safeText = escapeHtml(text);
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+        });
+
+        // URLs -> links
+        out = out.replace(/(https?:\/\/[^\s]+)/g, url => {
+            const s = escapeHtml(url);
+            return `<a href="${s}" target="_blank" rel="noopener noreferrer">${s}</a>`;
+        });
+
+        // Handle bullet lists (lines starting with -, *, •)
+        const lines = out.split(/\r?\n/);
+        let result = '';
+        let inList = false;
+        lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            if (/^([-*•])\s+/.test(trimmed)) {
+                if (!inList) { result += '<ul class="formatted-list">'; inList = true; }
+                result += `<li>${trimmed.replace(/^([-*•])\s+/, '')}</li>`;
+            } else {
+                if (inList) { result += '</ul>'; inList = false; }
+                if (trimmed === '') {
+                    // preserve paragraph separation
+                    result += '<p></p>';
+                } else {
+                    result += `<p>${trimmed}</p>`;
+                }
+            }
+        });
+        if (inList) result += '</ul>';
+
+        // Collapse multiple empty paragraphs
+        result = result.replace(/(<p><\/p>\s*)+/g, '<p></p>');
+        return result || '<div></div>';
+    }
+
+    function displayTextResult(data) {
+        const resultDiv = document.getElementById('result');
+
+        if (Array.isArray(data)) {
+            const formattedContent = data.map(row => {
+                const entries = Object.entries(row)
+                    .filter(([k]) => !k.startsWith('_'))
+                    .map(([key, value]) => {
+                        const formattedValue = value && typeof value === 'string'
+                            ? sanitizeAndFormat(value)
+                            : String(value);
+                        return `<strong>${key}:</strong> ${formattedValue}`;
+                    });
+                return `<div class="result-item">${entries.join('<br>')}</div>`;
+            }).join('<hr>');
+            resultDiv.innerHTML = formattedContent;
+        } else if (data && typeof data === 'object') {
+            // Filter out internal keys and format values
+            const filtered = {};
+            Object.entries(data).forEach(([k, v]) => {
+                if (k.startsWith('_')) return;
+                if (v === null || v === undefined) return;
+                filtered[k] = typeof v === 'string' ? sanitizeAndFormat(v) : String(v);
+            });
+            const formattedContent = Object.entries(filtered)
+                .map(([key, value]) => `<div class="result-item"><strong>${key}:</strong> ${value}</div>`)
+                .join('');
+            resultDiv.innerHTML = formattedContent;
+        } else {
+            // Handle primitive values
+            resultDiv.innerHTML = `<div class="result-item">${sanitizeAndFormat(String(data))}</div>`;
+        }
+    }
+
+    function displaySuccess(message) {
+        const div = document.createElement('div');
+        div.className = 'success-message';
+        div.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+        document.getElementById('result').appendChild(div);
+    }
+
+    function displayError(message) {
+        const div = document.createElement('div');
+        div.className = 'error-message';
+        div.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+        // Prefer confirmResult, fallback to result
+        const confirmResult = document.getElementById('confirmResult');
+        if (confirmResult) {
+            confirmResult.appendChild(div);
+        } else {
+            const resultDiv = document.getElementById('result');
+            if (resultDiv) resultDiv.appendChild(div);
+        }
+    }
+
+    function setCommand(command) {
+        document.getElementById('commandInput').value = command;
+    }
+
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return String(unsafe)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function isLikelySQL(s) {
+        if (!s || typeof s !== 'string') return false;
+        const trimmed = s.trim().toLowerCase();
+        // Accept common SQL starts or fenced SQL
+        if (trimmed.startsWith('select') || trimmed.startsWith('with') || trimmed.startsWith('insert') || trimmed.startsWith('update') || trimmed.startsWith('delete')) return true;
+        if (trimmed.startsWith('```sql') || trimmed.startsWith('```')) return true;
+        // also allow queries that contain typical SQL keywords
+        if (/\bfrom\b/.test(trimmed) && /\bselect\b/.test(trimmed)) return true;
+        return false;
+    }
+
+    function formatTimestamp(ts) {
+        if (!ts) return '';
+        try {
+            // If ISO-like string with 'T', replace with space and strip microseconds
+            if (typeof ts === 'string' && ts.includes('T')) {
+                let s = ts.replace('T', ' ');
+                // remove fractional seconds like .123456
+                s = s.replace(/\.\d+/, '');
+                return s.split('Z')[0].trim();
+            }
+            // If timestamp is numeric (epoch), format using Date
+            if (!isNaN(Number(ts))) {
+                const d = new Date(Number(ts));
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mi = String(d.getMinutes()).padStart(2, '0');
+                const ss = String(d.getSeconds()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+            }
+            // fallback: return as-is
+            return String(ts);
+        } catch (e) { return String(ts); }
+    }
+
+    async function loadHistory() {
+        const list = document.getElementById('historyList');
+        list.innerHTML = 'Loading...';
+        try {
+            const resp = await fetch('/api/query/history');
+            const data = await resp.json();
+            if (!Array.isArray(data) || data.length === 0) {
+                list.innerHTML = '<div class="text-muted">No history</div>';
+                return;
+            }
+            list.innerHTML = '';
+            data.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'history-item';
+                const title = escapeHtml(item.command || item.question || item.question || '');
+                const timeRaw = item.timestamp || item.date || '';
+                const timeFmt = formatTimestamp(timeRaw);
+                el.innerHTML = `<div class="item-title">${title}</div><div class="small text-muted">${escapeHtml(timeFmt)}</div>`;
+
+                // Delete button (hidden until hover) with confirmation
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    try {
+                        const ok = window.confirm('Delete this history item? This cannot be undone.');
+                        if (!ok) return;
+                        const resp = await fetch('/api/history/' + (item.id || item._history_id || item.history_id), { method: 'DELETE' });
+                        if (!resp.ok) {
+                            console.error('Failed to delete history item', resp.statusText);
+                            displayError('Failed to delete history item');
+                            return;
+                        }
+                        loadHistory();
+                    } catch (e) { console.error(e); displayError('Failed to delete history item'); }
+                });
+
+                el.appendChild(deleteBtn);
+
+                // Click on the history item loads the preview and reveals panels
+                el.addEventListener('click', async () => {
+                    try {
+                        // Collapse sidebar on mobile
+                        if (window.innerWidth <= 768) {
+                            const historyPanel = document.getElementById('historyPanel');
+                            const expandBtn = document.getElementById('expandHistoryBtn');
+                            if (historyPanel) historyPanel.classList.remove('expanded');
+                            if (expandBtn) expandBtn.style.display = 'block';
+                        }
+                        // Load main prompt into command input
+                        const mainText = item.command || item.question || '';
+                        document.getElementById('commandInput').value = mainText;
+
+                        // Restore chat panel and chatHistory from item.conversation if available
+                        const chatPanel = document.getElementById('chatPanel');
+                        if (chatPanel) chatPanel.innerHTML = '';
+                        let conversation = item.conversation || item.chat_history || [];
+                        if (!Array.isArray(conversation)) conversation = [];
+                        window.chatHistory = conversation.map(msg => ({ role: msg.role, text: msg.text }));
+                        // If conversation is empty, show a placeholder
+                        if (conversation.length === 0 && chatPanel) {
+                            chatPanel.innerHTML = '<div class="text-muted">Your conversation will appear here.</div>';
+                        } else if (chatPanel) {
+                            conversation.forEach(msg => {
+                                const row = document.createElement('div');
+                                row.className = 'chat-row ' + (msg.role === 'user' ? 'user' : 'assistant');
+                                const bubble = document.createElement('div');
+                                bubble.className = 'chat-bubble ' + (msg.role === 'user' ? 'chat-user' : 'chat-assistant');
+                                bubble.innerHTML = msg.text;
+                                row.appendChild(bubble);
+                                chatPanel.appendChild(row);
+                            });
+                            chatPanel.scrollTop = chatPanel.scrollHeight;
+                        }
+
+                        // Save preview and reveal panels so user can inspect/edit
+                        window.latestPreview = item;
+                        window.goClicked = true;
+                        document.getElementById('sqlPanel').style.display = 'block';
+                        document.getElementById('sqlEditor').style.display = 'none';
+                        document.getElementById('toggleSql').textContent = 'Show SQL';
+
+                        // Fill SQL into editor (hidden) and display explanation only if it looks like SQL
+                        try {
+                            const sqlVal = item.sql || '';
+                            if (sqlVal && isLikelySQL(sqlVal)) {
+                                document.getElementById('sqlEditor').value = sqlVal;
+                            } else {
+                                document.getElementById('sqlEditor').value = '';
+                            }
+                        } catch (e) { }
+
+                        // Enable confirm if the preview has a server-generated id
+                        const hasHistoryId = (item.id || item._history_id || item.history_id);
+                        document.getElementById('confirmBtn').disabled = !hasHistoryId;
+
+                        displayResult(item);
+                    } catch (e) { console.error(e); }
+                });
+
+                list.appendChild(el);
+            });
+        } catch (e) {
+            console.error(e);
+            list.innerHTML = '<div class="text-danger">Failed to load history</div>';
+        }
+    }
+
+    // New Chat button handler
+    document.getElementById('newChatBtn').addEventListener('click', () => {
+        // Collapse sidebar on mobile
+        if (window.innerWidth <= 768) {
+            const historyPanel = document.getElementById('historyPanel');
+            const expandBtn = document.getElementById('expandHistoryBtn');
+            if (historyPanel) historyPanel.classList.remove('expanded');
+            if (expandBtn) expandBtn.style.display = 'block';
+        }
+        // Clear chat panel
+        const chatPanel = document.getElementById('chatPanel');
+        if (chatPanel) chatPanel.innerHTML = '<div class="text-muted">Your conversation will appear here.</div>';
+        // Clear command input
+        document.getElementById('commandInput').value = '';
+        // Clear SQL editor
+        document.getElementById('sqlEditor').value = '';
+        // Clear chat history
+        window.chatHistory = [];
+        // Hide result area
+        document.getElementById('result').innerHTML = '';
+        document.getElementById('confirmResult').innerHTML = '';
+        // Optionally reset preview state
+        window.latestPreview = null;
+        window.goClicked = false;
+    });
+    // Load history on page load
+    loadHistory();
+    // Load DB tables for the DB search panel
+    loadDbTables();
+
+    // Clear all chat history button handler (with user feedback)
+    // Uses server-side clear if available, falls back to client-only clear
+    const clearBtn = document.getElementById('clearAllHistoryBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+            const ok = confirm('Clear all chat history? This cannot be undone.');
+            if (!ok) return;
+            let serverCleared = false;
+            try {
+                // Attempt server-side clear via /api/history (DELETE)
+                const resp = await fetch('/api/history', { method: 'DELETE' });
+                if (resp.ok || resp.status === 204) serverCleared = true;
+                else {
+                    // Try alternate endpoint used by history listing
+                    const alt = await fetch('/api/query/history', { method: 'DELETE' });
+                    if (alt.ok || alt.status === 204) serverCleared = true;
+                }
+            } catch (e) {
+                console.warn('Server-side clear failed or not available', e);
+            }
+
+            // Clear client-side chat history and refresh UI
+            try {
+                window.chatHistory = [];
+                const list = document.getElementById('historyList');
+                if (list) list.innerHTML = '<div class="text-muted">No history</div>';
+                loadHistory();
+                if (serverCleared) {
+                    displaySuccess('Chat history cleared on server and locally.');
+                } else {
+                    displaySuccess('Chat history cleared locally. Server-side clear not available or failed.');
+                }
+            } catch (e) {
+                console.error(e);
+                displayError('Failed to clear history locally.');
+            }
+        });
+    }
+
+    document.getElementById('dbSelectAll').addEventListener('change', (e) => {
+        const checked = e.target.checked;
+        document.querySelectorAll('#dbTablesList input[type=checkbox]').forEach(cb => cb.checked = checked);
+    });
+
+    document.getElementById('dbSearchBtn').addEventListener('click', async () => {
+        const q = document.getElementById('dbSearchInput').value.trim();
+        if (!q) { alert('Please enter search text'); return; }
+        const checked = Array.from(document.querySelectorAll('#dbTablesList input[type=checkbox]:checked')).map(i => i.value);
+        try {
+            const resp = await fetch('/api/db/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, tables: checked }) });
+            const data = await resp.json();
+            renderDbSearchResults(data);
+        } catch (e) {
+            console.error(e);
+            displayError('DB search failed');
+        }
+    });
+
+    document.getElementById('dbClearBtn').addEventListener('click', () => {
+        document.getElementById('dbSearchInput').value = '';
+        document.getElementById('dbSearchResults').innerHTML = '';
+    });
+
+    async function loadDbTables() {
+        try {
+            const resp = await fetch('/api/db/tables');
+            if (!resp.ok) {
+                const txt = await resp.text().catch(() => resp.statusText || 'Failed');
+                document.getElementById('dbTablesList').innerHTML = `<div class="text-danger small">Failed to load table list: ${escapeHtml(txt)}</div><div class="mt-2"><button id="retryTables" class="btn btn-sm btn-outline-secondary">Retry</button></div>`;
+                const retryBtn = document.getElementById('retryTables');
+                if (retryBtn) retryBtn.addEventListener('click', loadDbTables);
+                return;
+            }
+            const data = await resp.json();
+            const list = document.getElementById('dbTablesList');
+            list.innerHTML = '';
+            (data.tables || []).forEach(t => {
+                // Accept both {table_name: ...} and string
+                let tStr = (typeof t === 'string') ? t : (t && t.table_name ? t.table_name : (t && t.name ? t.name : String(t)));
+                const id = 'tbl_' + tStr.replace(/[^a-zA-Z0-9_]/g, '_');
+                const div = document.createElement('div');
+                div.className = 'form-check';
+                div.innerHTML = `<input class="form-check-input" type="checkbox" id="${id}" value="${tStr}"> <label class="form-check-label" for="${id}">${tStr}</label>`;
+                list.appendChild(div);
+            });
+        } catch (e) {
+            console.error('Failed to load DB tables', e);
+            document.getElementById('dbTablesList').innerHTML = '<div class="text-danger small">Failed to load table list</div>';
+        }
+    }
+
+    function renderDbSearchResults(payload) {
+        const container = document.getElementById('dbSearchResults');
+        container.innerHTML = '';
+        if (!payload || payload.error) {
+            container.innerHTML = '<div class="text-danger">No results or an error occurred.</div>';
+            return;
+        }
+        const q = payload.query;
+        const results = payload.results || [];
+        const header = document.createElement('div');
+        header.className = 'mb-2';
+        header.innerHTML = `<strong>Search results for "${escapeHtml(q)}"</strong>`;
+        container.appendChild(header);
+        results.forEach(tbl => {
+            if (!tbl.matches || tbl.matches.length === 0) return; // skip tables with no matches
+            const box = document.createElement('div');
+            box.className = 'mb-3';
+            const title = document.createElement('div');
+            title.innerHTML = `<strong>Table: ${escapeHtml(tbl.table)}</strong>`;
+            box.appendChild(title);
+
+            tbl.matches.forEach(m => {
+                const mdiv = document.createElement('div');
+                mdiv.className = 'mt-2';
+                mdiv.innerHTML = `<div><em>Column:</em> ${escapeHtml(m.column)} — <em>Matches:</em> ${m.count}</div>`;
+
+                const samplesWrap = document.createElement('div');
+                samplesWrap.className = 'small text-muted';
+                samplesWrap.textContent = 'Examples: ';
+
+                (m.samples || []).forEach((row, idx) => {
+                    const val = row[m.column] || Object.values(row)[0] || '';
+                    const text = ('' + val).substring(0, 120);
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'me-2';
+                    a.textContent = text + (('' + val).length > 120 ? '…' : '');
+                    a.addEventListener('click', (ev) => { ev.preventDefault(); showRowModal(row, tbl.table); });
+                    samplesWrap.appendChild(a);
+                });
+
+                mdiv.appendChild(samplesWrap);
+                box.appendChild(mdiv);
+            });
+
+            container.appendChild(box);
+        });
+    }
+
+    // Modal helper to show full row data
+    function showRowModal(rowObj, tableName) {
+        // Create modal content
+        const modalTitle = document.getElementById('dbRowModalTitle');
+        const modalBody = document.getElementById('dbRowModalBody');
+        modalTitle.textContent = `Table: ${tableName}`;
+        modalBody.innerHTML = '';
+
+        const tbl = document.createElement('table');
+        tbl.className = 'table table-sm table-striped';
+        const tb = document.createElement('tbody');
+        Object.keys(rowObj).forEach(k => {
+            const tr = document.createElement('tr');
+            const th = document.createElement('th');
+            th.style.width = '30%';
+            th.textContent = k;
+            const td = document.createElement('td');
+            td.textContent = rowObj[k] === null ? '' : String(rowObj[k]);
+            tr.appendChild(th);
+            tr.appendChild(td);
+            tb.appendChild(tr);
+        });
+        tbl.appendChild(tb);
+        modalBody.appendChild(tbl);
+
+        // Show bootstrap modal
+        try {
+            const modalEl = document.getElementById('dbRowModal');
+            const bsModal = new bootstrap.Modal(modalEl);
+            bsModal.show();
+        } catch (e) {
+            // Fallback: alert with JSON
+            alert(JSON.stringify(rowObj, null, 2));
+        }
+    }
+
+    // Clarifier modal JS helpers
+    function showClarifyModal(candidates, question) {
+        let modal = document.getElementById('clarifyModal');
+        if (!modal) return;
+        const list = modal.querySelector('.clarify-candidates');
+        const info = modal.querySelector('.clarify-info');
+        list.innerHTML = '';
+        info.textContent = 'We found multiple candidate tables related to your question. Select one or more and click Confirm.';
+        if (!Array.isArray(candidates) || candidates.length === 0) {
+            info.textContent = 'No candidate tables found.';
+        }
+
+        // Add checkbox list
+        const form = document.createElement('div');
+        form.className = 'clarify-checkboxes';
+        (candidates || []).slice(0, 20).forEach((c, idx) => {
+            const id = `clarify_cb_${idx}`;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input';
+            cb.id = id;
+            cb.value = c;
+            const lbl = document.createElement('label');
+            lbl.className = 'form-check-label';
+            lbl.htmlFor = id;
+            lbl.textContent = c;
+            wrapper.appendChild(cb);
+            wrapper.appendChild(lbl);
+            form.appendChild(wrapper);
+        });
+        list.appendChild(form);
+
+        // Controls: Select all, Clear, Confirm, Use none
+        const controls = document.createElement('div');
+        controls.style.marginTop = '10px';
+
+        const selectAllBtn = document.createElement('button');
+        selectAllBtn.className = 'btn btn-sm btn-outline-secondary m-1';
+        selectAllBtn.textContent = 'Select all';
+        selectAllBtn.addEventListener('click', () => {
+            form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
+        });
+
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'btn btn-sm btn-outline-secondary m-1';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', () => {
+            form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+        });
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'btn btn-sm btn-primary m-1';
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.addEventListener('click', async () => {
+            const selected = Array.from(form.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+            hideClarifyModal();
+            await submitWithSelection(question, selected);
+        });
+
+        const useNone = document.createElement('button');
+        useNone.className = 'btn btn-sm btn-secondary m-1';
+        useNone.textContent = 'None of the above';
+        useNone.addEventListener('click', async () => {
+            hideClarifyModal();
+            await submitWithSelection(question, []);
+        });
+
+        controls.appendChild(selectAllBtn);
+        controls.appendChild(clearBtn);
+        controls.appendChild(confirmBtn);
+        controls.appendChild(useNone);
+
+        list.appendChild(controls);
+
+        modal.style.display = 'flex';
+    }
+
+    function hideClarifyModal() {
+        const modal = document.getElementById('clarifyModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    async function submitWithSelection(question, selected_tables) {
+        try {
+            // mimic the original submit flow but include selected_tables
+            const button = document.getElementById('submitBtn');
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+            const response = await fetch('/api/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question, conversation: window.chatHistory.slice(-50), selected_tables: selected_tables })
+            });
+            const data = await response.json();
+            window.latestPreview = data;
+
+            // Render assistant message and SQL as usual
+            if (data.type === 'clarify') {
+                // if backend still wants clarification, show modal again using provided candidates
+                showClarifyModal(data.candidates || [], question);
+            } else {
+                // append assistant text
+                const assistantText = data.explanation || data.response || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
+                try { appendChat('assistant', assistantText); } catch (e) { }
+                if (data.sql && typeof data.sql === 'string') document.getElementById('sqlEditor').value = data.sql;
+            }
+
+            button.disabled = false;
+            button.innerHTML = originalText;
+        } catch (e) {
+            console.error(e);
+            hideClarifyModal();
+            try { displayError('Failed to submit selection'); } catch (e2) { }
+        }
+    }
+
+    // Visualization helpers: dynamic chart rendering, export to Word, compressed summary
+    function getCurrentResultData() {
+        // Prefer executed results, then sample rows, then latest preview results
+        const lp = window.latestPreview || {};
+        const candidate = lp.results || lp.sample_rows || lp.data || lp.presentation || null;
+        if (!candidate) return null;
+        // normalize to array of objects
+        if (Array.isArray(candidate)) return candidate;
+        // if in presentation format with table.headers and rows
+        if (candidate.table && candidate.table.rows) {
+            const headers = candidate.table.headers || [];
+            return candidate.table.rows.map(r => {
+                const obj = {};
+                headers.forEach((h, i) => obj[h] = r[i]);
+                return obj;
+            });
+        }
+        return null;
+    }
+
+    function inferColumnsForChart(rows) {
+        if (!rows || !rows.length) return null;
+        const keys = Object.keys(rows[0]);
+        // find first string-like and first numeric-like column
+        let labelKey = null, valueKey = null;
+        for (const k of keys) {
+            const v = rows[0][k];
+            if (labelKey === null && typeof v === 'string') labelKey = k;
+            if (valueKey === null && (typeof v === 'number' || (!isNaN(parseFloat(v)) && isFinite(v)))) valueKey = k;
+            if (labelKey && valueKey) break;
+        }
+        // fallback: use first two columns
+        if (!labelKey && keys.length) labelKey = keys[0];
+        if (!valueKey && keys.length > 1) valueKey = keys[1];
+        return { labelKey, valueKey };
+    }
+
+    function renderChartFromRows(chartType) {
+        const rows = getCurrentResultData();
+        if (!rows || rows.length === 0) { alert('No result rows available to chart. Run the query first.'); return; }
+        const cols = inferColumnsForChart(rows);
+        if (!cols || !cols.labelKey || !cols.valueKey) { alert('Could not infer columns for chart.'); return; }
+
+        const labels = rows.map(r => r[cols.labelKey]);
+        const values = rows.map(r => Number(r[cols.valueKey]) || 0);
+
+        const container = document.getElementById('result');
+        container.innerHTML = '';
+        const canvas = document.createElement('canvas');
+        canvas.id = 'visualizationCanvas';
+        canvas.style.maxHeight = '400px';
+        container.appendChild(canvas);
+
+        try {
+            const ctx = canvas.getContext('2d');
+            // destroy existing chart if present
+            if (window._intel_chart_instance) { try { window._intel_chart_instance.destroy(); } catch (e) { } }
+            const cfg = {
+                type: chartType === 'area' ? 'line' : chartType,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: cols.valueKey,
+                        data: values,
+                        backgroundColor: chartType === 'pie' ? labels.map((_, i) => `hsl(${(i * 40) % 360} 60% 60%)`) : 'rgba(54,162,235,0.4)',
+                        borderColor: 'rgba(54,162,235,1)',
+                        fill: chartType === 'area'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            };
+            window._intel_chart_instance = new Chart(ctx, cfg);
+        } catch (e) { console.error('Chart render error', e); alert('Failed to render chart.'); }
+    }
+
+    // Show or hide visualization controls based on the returned data and prompt.
+    function updateVizControlsVisibility(data) {
+        try {
+            const controls = document.getElementById('chartControls');
+            const chartSelect = document.getElementById('chartTypeSelect');
+            const showChartBtn = document.getElementById('showChartBtn');
+            const exportWordBtn = document.getElementById('exportWordBtn');
+            const compressSummaryBtn = document.getElementById('compressSummaryBtn');
+
+            const lp = data || window.latestPreview || {};
+            // Determine if there are tabular rows available
+            let hasRows = false;
+            if (Array.isArray(lp.results) && lp.results.length > 0) hasRows = true;
+            if (lp.data && lp.data.table && Array.isArray(lp.data.table.rows) && lp.data.table.rows.length > 0) hasRows = true;
+            if (Array.isArray(lp) && lp.length > 0) hasRows = true;
+            if (lp.presentation && lp.presentation.table && Array.isArray(lp.presentation.table.rows) && lp.presentation.table.rows.length > 0) hasRows = true;
+
+            // Determine if a chart was requested or is appropriate
+            let wantsChart = false;
+            if (lp.formatted && typeof lp.formatted === 'object') {
+                const fmt = (lp.formatted.format || '').toString().toLowerCase();
+                if (fmt === 'chart' || fmt === 'plot') wantsChart = true;
+                // formatted.content could be a chart descriptor
+                if (lp.formatted.content && lp.formatted.content.type === 'chart') wantsChart = true;
+            }
+            if (lp.visualization && (lp.visualization.chart || lp.visualization.chart_type)) wantsChart = true;
+
+            // Heuristic: inspect the user prompt for chart/plot keywords when rows exist
+            const promptText = (document.getElementById('commandInput')?.value || '') || (lp.question || lp.command || '');
+            if (!wantsChart && hasRows && /\b(chart|plot|bar|pie|line|area|histogram|visualiz)/i.test(promptText)) wantsChart = true;
+
+            const showControls = hasRows && (wantsChart || lp.type === 'query_result');
+
+            if (controls) controls.style.display = showControls ? 'block' : 'none';
+            if (chartSelect) chartSelect.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
+            if (showChartBtn) showChartBtn.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
+            if (exportWordBtn) exportWordBtn.style.display = hasRows ? 'inline-block' : 'none';
+            if (compressSummaryBtn) compressSummaryBtn.style.display = !!lp && lp.type !== 'action_completed' ? 'inline-block' : 'none';
+
+            // If controls are shown and a chart is preferred, auto-render a preview chart
+            if (showControls && wantsChart) {
+                // delay slightly to allow DOM to update
+                setTimeout(() => {
+                    const t = (document.getElementById('chartTypeSelect')?.value) || 'bar';
+                    try { renderChartFromRows(t); } catch (e) { /* ignore */ }
+                }, 50);
+            }
+
+        } catch (e) { console.warn('updateVizControlsVisibility error', e); }
+    }
+
+    async function exportToWord() {
+        const rows = getCurrentResultData();
+        if (!rows || rows.length === 0) { alert('No result rows available to export.'); return; }
+        const headers = Object.keys(rows[0]);
+        const payload = { title: (document.getElementById('commandInput')?.value || 'Export').slice(0, 60), summary: '', table: { headers: headers, rows: rows.map(r => headers.map(h => r[h])) } };
+        try {
+            const resp = await fetch('/api/presentation/word', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!resp.ok) {
+                const txt = await resp.text(); throw new Error(txt || resp.statusText);
+            }
+            const blob = await resp.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = (payload.title || 'export') + '.docx'; document.body.appendChild(a); a.click(); a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (e) { console.error('Export error', e); alert('Failed to export to Word: ' + e.message); }
+    }
+
+    async function requestCompressedSummary() {
+        const q = (document.getElementById('commandInput')?.value || '') || (window.chatHistory && window.chatHistory.slice(-1)[0] && window.chatHistory.slice(-1)[0].text) || '';
+        if (!q) { alert('No question in context to summarize.'); return; }
+        try {
+            const resp = await fetch('/api/rag/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) });
+            if (!resp.ok) { const txt = await resp.text(); throw new Error(txt || resp.statusText); }
+            const data = await resp.json();
+            const sum = data.summary || data.error || 'No summary returned.';
+            appendChat('assistant', sum);
+        } catch (e) { console.error('Summary error', e); alert('Failed to get compressed summary.'); }
+    }
+
+    // Wire up new control buttons
+    document.addEventListener('DOMContentLoaded', () => {
+        const showChartBtn = document.getElementById('showChartBtn');
+        const exportWordBtn = document.getElementById('exportWordBtn');
+        const compressSummaryBtn = document.getElementById('compressSummaryBtn');
+        if (showChartBtn) showChartBtn.addEventListener('click', () => {
+            const t = document.getElementById('chartTypeSelect')?.value || 'bar'; renderChartFromRows(t);
+        });
+        if (exportWordBtn) exportWordBtn.addEventListener('click', exportToWord);
+        if (compressSummaryBtn) compressSummaryBtn.addEventListener('click', requestCompressedSummary);
+        // re-render chart on chart type change if chart already displayed
+        const chartSelect = document.getElementById('chartTypeSelect');
+        if (chartSelect) {
+            chartSelect.addEventListener('change', () => {
+                if (window._intel_chart_instance) {
+                    const t = chartSelect.value || 'bar';
+                    renderChartFromRows(t);
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

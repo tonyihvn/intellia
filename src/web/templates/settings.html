@@ -53,6 +53,14 @@
             <h3 class="h5 mb-0">Cloud LLM Providers</h3>
         </div>
         <div class="card-body">
+            <!-- Master Cloud Disable Switch -->
+            <div class="mb-3 d-flex align-items-center justify-content-between">
+                <label class="form-label mb-0"><strong>Disable all Cloud LLMs</strong></label>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cloud-llm-disabled">
+                    <label class="form-check-label" for="cloud-llm-disabled">Disabled</label>
+                </div>
+            </div>
             <!-- Providers Management -->
             <div class="mb-4">
                 <h4 class="h6">Providers Management</h4>
@@ -255,6 +263,12 @@
         try {
             const res = await fetch('/api/llm/providers');
             const providers = await res.json();
+            // Set master disable switch if provided
+            try {
+                const disabled = !!providers.cloud_disabled;
+                const sw = document.getElementById('cloud-llm-disabled');
+                if (sw) sw.checked = disabled;
+            } catch (e) {}
             const providerNames = Object.keys(providers).sort((a, b) => (providers[a].priority || 99) - (providers[b].priority || 99));
             list.innerHTML = providerNames.map(name => {
                 const p = providers[name];
@@ -393,6 +407,9 @@
             const res = await fetch('/api/llm/providers');
             const providers = await res.json();
             const payload = { providers: {} };
+            // include cloud disabled master switch
+            const sw = document.getElementById('cloud-llm-disabled');
+            if (sw) payload.cloud_disabled = !!sw.checked;
             for (const name of Object.keys(providers)) {
                 // If provider exposes models (local provider), capture models priority
                 if (providers[name].models && Array.isArray(providers[name].models)) {

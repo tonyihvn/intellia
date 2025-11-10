@@ -11,7 +11,7 @@
             "priority": 3,
             "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
             "model": "gemini-2.0-flash",
-            "enabled": true,
+            "enabled": false,
             "timeout": 30
         },
         "vertex": {

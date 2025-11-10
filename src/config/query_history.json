@@ -1,112 +1,12 @@
 [
   {
-    "id": "1214c498-1a31-4a37-a21d-fb4a3d3445ce",
-    "timestamp": "2025-11-07T16:16:58.180067",
-    "command": "Display a Pie Chart of total people with organization and people without in the database",
+    "id": "f1dfecc4-9da0-4147-9ca9-c8f27fd72953",
+    "timestamp": "2025-11-10T13:07:35.612717",
+    "command": "Display records of all the clients who has no phone number",
     "type": "query_preview",
-    "sql": "/* ```sql\n-- This query counts the number of contacts with and without organization information to be used in a pie chart. The result set contains two columns: 'Has Organization' and 'Count'.\n\n``` */\nSELECT \n    CASE\n        WHEN organization IS NULL OR organization = '' THEN 'No Organization'\n        ELSE 'Has Organization'\n    END AS 'Has Organization',\n    COUNT(*) AS 'Count'\nFROM contacts\nGROUP BY 'Has Organization';",
-    "explanation": "```sql\n-- This query counts the number of contacts with and without organization information to be used in a pie chart. The result set contains two columns: 'Has Organization' and 'Count'.\n\n```",
-    "status": "success",
-    "error": null,
-    "result": {
-      "type": "sql_executed",
-      "results": [
-        {
-          "Has Organization": "Has Organization",
-          "Count": 105
-        }
-      ],
-      "formatted": {
-        "format": "tabular",
-        "content_type": "text/html",
-        "content": "<table><thead><tr><th>Has Organization</th><th>Count</th></tr></thead><tbody><tr><td>Has Organization</td><td>105</td></tr></tbody></table>"
-      }
-    }
-  },
-  {
-    "id": "7dc5a0fe-4e54-472a-be11-3ce5700a8c33",
-    "timestamp": "2025-11-07T16:15:02.038494",
-    "command": "Display a Pie Chart of total people with organization and people without in the database",
-    "type": "query_preview",
-    "sql": "/* ```sql\n-- This query generates the data needed for a pie chart showing the count of contacts with and without organization information. The result set contains two columns: 'Has Organization' and 'Count'.\n\n``` */\nSELECT \n  CASE WHEN organization IS NULL OR organization = '' THEN 'No Organization' ELSE 'Has Organization' END AS 'Has Organization',\n  COUNT(*) AS 'Count'\nFROM contacts\nGROUP BY CASE WHEN organization IS NULL OR organization = '' THEN 'No Organization' ELSE 'Has Organization' END;\n{\"presentation\": {\"display\": \"chart\", \"chartType\": \"pie\"}}",
-    "explanation": "```sql\n-- This query generates the data needed for a pie chart showing the count of contacts with and without organization information. The result set contains two columns: 'Has Organization' and 'Count'.\n\n```",
-    "status": "success",
-    "error": null,
-    "result": {
-      "type": "sql_executed",
-      "results": [
-        {
-          "Has Organization": "Has Organization",
-          "Count": 7
-        },
-        {
-          "Has Organization": "No Organization",
-          "Count": 98
-        }
-      ],
-      "formatted": {
-        "format": "tabular",
-        "content_type": "text/html",
-        "content": "<table><thead><tr><th>Has Organization</th><th>Count</th></tr></thead><tbody><tr><td>Has Organization</td><td>7</td></tr><tr><td>No Organization</td><td>98</td></tr></tbody></table>"
-      }
-    }
-  },
-  {
-    "id": "6ed372e6-759f-42d9-8f34-7bc5b26befa7",
-    "timestamp": "2025-11-07T15:43:18.320739",
-    "command": "Display a Pie Chart of total people with organization and people without in the database",
-    "type": "query_preview",
-    "sql": "SELECT \n  CASE WHEN organization IS NULL OR organization = '' THEN 'No Organization' ELSE 'With Organization' END AS organization_status,\n  COUNT(*) AS count\nFROM contacts\nGROUP BY organization_status;",
-    "explanation": "```sql\n-- This query retrieves the count of contacts with and without organization information to be used for a pie chart.\n\n```",
-    "status": "success",
-    "error": null,
-    "result": {
-      "type": "sql_executed",
-      "results": [
-        {
-          "organization_status": "No Organization",
-          "count": 98
-        },
-        {
-          "organization_status": "With Organization",
-          "count": 7
-        }
-      ],
-      "formatted": {
-        "format": "tabular",
-        "content_type": "text/html",
-        "content": "<table><thead><tr><th>organization_status</th><th>count</th></tr></thead><tbody><tr><td>No Organization</td><td>98</td></tr><tr><td>With Organization</td><td>7</td></tr></tbody></table>"
-      }
-    }
-  },
-  {
-    "id": "232148d7-7992-4bf3-9a4f-9293df873a61",
-    "timestamp": "2025-11-07T15:37:52.799969",
-    "command": "I want only those that has organization record",
-    "type": "query_preview",
-    "sql": "SELECT organization, name FROM contacts WHERE organization IS NOT NULL AND organization <> '';",
-    "explanation": "```sql\n-- This query retrieves the organization and name from the contacts table for records where the organization is not null or an empty string.\n\n```",
+    "sql": "SELECT * FROM `users` WHERE phone_number IS NULL;",
+    "explanation": "",
     "status": "preview",
     "error": null
-  },
-  {
-    "id": "4b569919-0e42-4cd6-a0ff-42b176b04731",
-    "timestamp": "2025-11-07T15:33:53.437788",
-    "command": "Display a list of companies and the contact person",
-    "type": "query_preview",
-    "sql": "SELECT organization, name FROM contacts;",
-    "explanation": "```sql\n-- This query retrieves a list of company names and their corresponding contact person names from the contacts table.\n\n```",
-    "status": "preview",
-    "error": null
-  },
-  {
-    "id": "ed40de72-ef6c-4e3f-901a-f370ee1f26c3",
-    "timestamp": "2025-11-07T15:33:01.521949",
-    "command": "Display a list of companies and the contact person",
-    "type": "query_preview",
-    "sql": null,
-    "explanation": "```sql\n\n```",
-    "status": "error",
-    "error": "SQL validation failed: {'ok': False, 'found': ['contact'], 'tables': ['accountheads', 'attendances', 'contacts', 'controls', 'deliveries', 'diagnosis', 'expenditure', 'failed_jobs', 'jobs', 'migrations', 'parts', 'partsorders', 'password_resets', 'payments', 'personal_access_tokens', 'personnels', 'psfus', 'sales', 'serviceorders', 'settings', 'stocks', 'supplies', 'tasks', 'transactions', 'users', 'vehicles'], 'missing_tables': ['contact'], 'missing_columns': [{'table': None, 'column': 'name'}]}"
   }
 ]

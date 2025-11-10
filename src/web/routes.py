@@ -42,10 +42,17 @@ except Exception:
 main_routes = Blueprint('main', __name__, url_prefix='/api')
 
 
-def client_error_response(message, exception=None, status=500):
+def client_error_response(message, exception=None, status=500, stage=None):
     """Return a Flask response with an environment-appropriate error payload."""
     try:
-        payload = Config.client_error_payload(message, exception)
+        # Allow callers to explicitly pass a stage parameter, or infer it from exception.stage
+        if not stage:
+            try:
+                if exception is not None and hasattr(exception, 'stage'):
+                    stage = getattr(exception, 'stage')
+            except Exception:
+                stage = None
+        payload = Config.client_error_payload(message, exception, stage=stage)
     except Exception:
         payload = {'error': 'An internal error occurred'}
     return jsonify(payload), status
@@ -538,7 +545,53 @@ def handle_query():
         return jsonify({'error': 'Please provide a question or command'}), 400
 
     try:
-        # Initialize command handler
+        # Fast-path cache: if we have a previous successful history entry for this exact command,
+        # return it immediately to avoid re-running the heavy LLM flow.
+        try:
+            history = Config.get_query_history()
+            norm_cmd = (command or '').strip().lower()
+            for h in history:
+                try:
+                    if (h.get('command') or '').strip().lower() == norm_cmd and h.get('status') == 'success' and h.get('result'):
+                        cached = h.get('result')
+                        # Attach history id and a cached flag
+                        if isinstance(cached, dict):
+                            cached['_history_id'] = h.get('id')
+                            cached['cached'] = True
+                            cached['note'] = 'Returned from history cache'
+                            return jsonify(cached)
+                except Exception:
+                    continue
+        except Exception:
+            # If history lookup fails, ignore and continue to normal flow
+            pass
+
+        # Check featured/auto-run examples — if the exact command exists in examples with auto_run
+        try:
+            rm = RAGManager()
+            exs = rm.get_all_examples() or []
+            for ex in exs:
+                try:
+                    if (ex.get('text') or '').strip().lower() == (command or '').strip().lower():
+                        meta = ex.get('metadata', {}) or {}
+                        if meta.get('auto_run'):
+                            # Execute immediately using the usual handler
+                            llm_client = LLMClient()
+                            query_handler = get_query_handler()
+                            command_handler = CommandHandler(llm_client, query_handler)
+                            res = command_handler.handle_command(command, execute=True)
+                            if isinstance(res, dict):
+                                res['_auto_run'] = True
+                            return jsonify(res)
+                        # If featured but not auto_run, return a quick example hint to the client
+                        if meta.get('featured'):
+                            return jsonify({'type': 'example_match', 'example': ex.get('text'), 'featured': True})
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # Initialize command handler (normal path)
         llm_client = LLMClient()
         query_handler = get_query_handler()
         command_handler = CommandHandler(llm_client, query_handler)
@@ -588,8 +641,14 @@ def handle_query():
         history = Config.get_query_history()
         history.insert(0, history_entry)
         Config.save_query_history(history[:50])
-        
-        return jsonify({'error': error_message}), 500
+
+        # Tag the exception with the processing stage so staging clients can surface it
+        try:
+            setattr(e, 'stage', 'handle_query')
+        except Exception:
+            pass
+        # Return environment-appropriate payload including stage info in staging
+        return client_error_response(f'Error handling command: {error_message}', exception=e, status=500)
 
 
 @main_routes.route('/confirm', methods=['POST'])
@@ -851,6 +910,10 @@ def confirm_action():
                 Config.save_query_history(history[:50])
         except Exception:
             pass
+    try:
+        setattr(e, 'stage', 'confirm_action')
+    except Exception:
+        pass
     return client_error_response(str(e), e, 500)
 
 @main_routes.route('/execute', methods=['POST'])

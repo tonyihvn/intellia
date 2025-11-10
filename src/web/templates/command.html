@@ -408,10 +408,10 @@
             <label for="commandInput" class="form-label"><b>What would you like to do?</b></label>
             <small class="text-muted"><i>Ask questions, schedule tasks, or take immediate actions</i></small>
             <textarea class="command-input" id="commandInput" rows="4" placeholder="Examples:
-- Show me all details of the last record in a named table
-- Send an email to admin@example.com now with subject 'Daily Report'
-- Every Monday at 9am, send an email to team@example.com about weekly statistics
-- Call API POST https://example.com/api/update now with body {'status': 'active'}"></textarea>
+                    - Show me all details of the last record in a named table
+                    - Send an email to admin@example.com now with subject 'Daily Report'
+                    - Every Monday at 9am, send an email to team@example.com about weekly statistics
+                    - Call API POST https://example.com/api/update now with body {'status': 'active'}"></textarea>
         </div>
 
         <div class="button-group mb-4">
@@ -423,6 +423,10 @@
             </button>
 
             <button id="confirmBtn" class="btn btn-success" disabled>Confirm (Execute)</button>
+            <button id="savePerfectBtn" class="btn btn-outline-secondary ms-2" title="Save perfect query"
+                style="display:none;">
+                <i class="fas fa-star"></i> Save Perfect
+            </button>
         </div>
 
         <div class="row command-row">
@@ -552,12 +556,34 @@
 <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
 <script src="https://cdn.datatables.net/keytable/2.8.0/js/dataTables.keyTable.min.js"></script>
 <script>
+    // SweetAlert2 fallback: override native alert to use Swal if available
+    if (typeof Swal !== 'undefined') {
+        window.alert = function (msg) {
+            try {
+                const title = (typeof msg === 'string') ? msg : JSON.stringify(msg);
+                Swal.fire({ icon: 'info', title: title, toast: true, position: 'top-end', timer: 4000, showConfirmButton: false });
+            } catch (e) { console.log('Swal fallback failed', e); }
+        };
+    }
+
+    // Centralized fetch helper that throws rich errors with server payload attached
+    async function fetchJson(url, opts = {}) {
+        const res = await fetch(url, opts);
+        if (!res.ok) {
+            let payload;
+            try { payload = await res.json(); } catch (e) { payload = { error: await res.text() }; }
+            const err = new Error(payload.error || res.statusText || 'Request failed');
+            err.payload = payload;
+            err.status = res.status;
+            throw err;
+        }
+        return res.json();
+    }
+
     // Load schema knowledge and business rules into collapsible lists
     async function loadKnowledgeLists() {
         try {
-            const resp = await fetch('/api/rag/knowledge');
-            if (!resp.ok) throw new Error('Failed to load knowledge');
-            const data = await resp.json();
+            const data = await fetchJson('/api/rag/knowledge');
             // Schema Knowledge
             const schemaList = document.getElementById('schemaKnowledgeList');
             if (schemaList) {
@@ -635,562 +661,672 @@
     window.goClicked = false;
     // maintain an in-memory chat history (sent to server for context)
     window.chatHistory = [];
+    // Persist chosen model across the session to avoid switching
+    window.selectedLLM = null;
+
+    // Resolve LLM once: prefer first cloud LLM, else first local LLM
+    async function resolveSelectedLLM() {
+        if (window.selectedLLM) return window.selectedLLM;
+        // Try to fetch from settings endpoint
+        try {
+            const res = await fetch('/api/settings');
+            if (res.ok) {
+                const s = await res.json();
+                const cloud = (s.cloud_llms || s.cloudLLMs || s.llms_cloud || []);
+                const local = (s.local_llms || s.localLLMs || s.llms_local || []);
+                if (Array.isArray(cloud) && cloud.length > 0) {
+                    window.selectedLLM = cloud[0];
+                    return window.selectedLLM;
+                }
+                if (Array.isArray(local) && local.length > 0) {
+                    window.selectedLLM = local[0];
+                    return window.selectedLLM;
+                }
+            }
+        } catch (e) { /* ignore and fall back */ }
+        // Fallback to any globals that may be present
+        try {
+            const app = window.appSettings || window.__APP__ || {};
+            const cloud = app.cloud_llms || app.cloudLLMs || [];
+            const local = app.local_llms || app.localLLMs || [];
+            if (Array.isArray(cloud) && cloud.length > 0) {
+                window.selectedLLM = cloud[0];
+                return window.selectedLLM;
+            }
+            if (Array.isArray(local) && local.length > 0) {
+                window.selectedLLM = local[0];
+                return window.selectedLLM;
+            }
+        } catch (e) { }
+        // As a last resort, leave null; backend default will apply
+        return null;
+    }
+    // Hoisted appendChat: available to all features before first submit
+    function appendChat(role, text, actionDetails) {
+        try {
+            const chatPanel = document.getElementById('chatPanel');
+            if (!chatPanel) return;
+            const row = document.createElement('div');
+            row.className = 'chat-row ' + (role === 'user' ? 'user' : 'assistant');
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble ' + (role === 'user' ? 'chat-user' : 'chat-assistant');
+            let fullText = text;
+            if (role === 'assistant' && actionDetails) {
+                fullText += `<div class="action-details-summary" style="margin: 6px 0 0 0; font-size: 0.95em; color: #0d6efd; background: #e9f5ff; border-radius: 8px; padding: 6px 10px;"><b>Action to be taken on Confirm:</b> <br>${actionDetails}</div>`;
+            }
+            bubble.innerHTML = fullText;
+            row.appendChild(bubble);
+            chatPanel.appendChild(row);
+            try {
+                if (role === 'assistant' && actionDetails) {
+                    window.chatHistory.push({ role: role, text: text, action_details: actionDetails });
+                } else {
+                    window.chatHistory.push({ role: role, text: text });
+                }
+            } catch (e) { }
+            chatPanel.scrollTop = chatPanel.scrollHeight;
+        } catch (e) { console.warn('appendChat error', e); }
+    }
 
     document.getElementById('submitBtn').addEventListener('click', async () => {
         const command = document.getElementById('commandInput').value.trim();
         if (!command) {
-            alert('Please enter a command.');
+            Swal.fire({ icon: 'warning', title: 'Please enter a command', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
             return;
         }
 
-        const chatPanel = document.getElementById('chatPanel');
-        const appendChat = (role, text, actionDetails) => {
-            try {
-                const row = document.createElement('div');
-                row.className = 'chat-row ' + (role === 'user' ? 'user' : 'assistant');
-                const bubble = document.createElement('div');
-                bubble.className = 'chat-bubble ' + (role === 'user' ? 'chat-user' : 'chat-assistant');
-                let fullText = text;
-                if (role === 'assistant' && actionDetails) {
-                    fullText += `<div class="action-details-summary" style="margin: 6px 0 0 0; font-size: 0.95em; color: #0d6efd; background: #e9f5ff; border-radius: 8px; padding: 6px 10px;"><b>Action to be taken on Confirm:</b> <br>${actionDetails}</div>`;
-                }
-                bubble.innerHTML = fullText;
-                row.appendChild(bubble);
-                chatPanel.appendChild(row);
-                // store in history for subsequent requests, including action details for assistant
-                try {
-                    if (role === 'assistant' && actionDetails) {
-                        window.chatHistory.push({ role: role, text: text, action_details: actionDetails });
-                    } else {
-                        window.chatHistory.push({ role: role, text: text });
-                    }
-                } catch (e) { }
-                chatPanel.scrollTop = chatPanel.scrollHeight;
-            } catch (e) { console.warn('appendChat error', e); }
-        };
+        // Clear chat panel since we're starting a new interaction
+        document.getElementById('chatPanel').innerHTML = '';
 
-        // Immediately show the user's message in the chat panel and record it
+        // Show user's message immediately
         appendChat('user', command);
-        // Save latest command so rendering logic can refer to user intent (chart/table/analysis/email)
         window.latestCommand = command;
 
-        const button = document.getElementById('submitBtn');
-        const originalText = button.innerHTML;
-        button.disabled = true;
-        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            const button = document.getElementById('submitBtn');
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
-        try {
-            const response = await fetch('/api/query', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: command, conversation: window.chatHistory.slice(-50) })
-            });
-
-            const data = await response.json();
-            window.latestPreview = data;
-
-            // Update visualization controls visibility depending on returned data
-            try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
-
-            // Panels are always visible now
-            window.goClicked = true;
-
-            // Render assistant response in chat and keep SQL editor populated if present.
             try {
-                // Always show all explanations, reasoning, and business rules in the chat only
-                if (data.type === 'chat_response') {
-                    appendChat('assistant', data.response || '');
-                    // Only put SQL in the editor if present and ONLY if it's a valid SQL string
-                    if (data.sql && typeof data.sql === 'string') {
-                        document.getElementById('sqlEditor').value = data.sql;
-                    } else {
-                        document.getElementById('sqlEditor').value = '';
-                    }
-                } else if (data.type === 'clarify') {
-                    // Show clarifier modal and a short assistant prompt
-                    try { appendChat('assistant', data.prompt || 'Please select which table(s) to use.'); } catch (e) { }
-                    showClarifyModal(data.candidates || [], command);
-                } else if (data.type === 'query_preview' || data.type === 'action_preview') {
-                    // Show all explanations, business rules, and reasoning in the chat
-                    const assistantText = [
-                        data.explanation,
-                        data.sql_explanation,
-                        data.planned_action
-                    ].filter(Boolean).join('<br>');
-                    // Compose a detailed action summary for the user
-                    let actionSummary = '';
-                    if (data.action_details) {
-                        actionSummary = data.action_details;
-                    } else if (data.sql) {
-                        actionSummary = `The following SQL will be executed: <pre>${escapeHtml(data.sql)}</pre>`;
-                    } else if (data.planned_action) {
-                        actionSummary = data.planned_action;
-                    } else if (data.explanation) {
-                        actionSummary = data.explanation;
-                    } else {
-                        actionSummary = 'A database or API action will be performed.';
-                    }
-                    appendChat('assistant', assistantText, actionSummary);
-                    // Only put SQL in the editor if present and ONLY if it's a valid SQL string
-                    if (data.sql && typeof data.sql === 'string') {
-                        document.getElementById('sqlEditor').value = data.sql;
-                    } else {
-                        document.getElementById('sqlEditor').value = '';
-                    }
-                    // if there was a validation error, show as error in result
-                    if (data.error) {
-                        displayError('SQL validation: ' + data.error);
-                    }
-                } else {
-                    // For results or other responses, show a short assistant note
-                    const note = data.explanation || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
-                    appendChat('assistant', note || 'Result returned.');
-                }
-            } catch (e) { console.warn('chat render error', e); }
+                const model = await resolveSelectedLLM();
+                const data = await fetchJson('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: command,
+                        conversation: window.chatHistory.slice(-50),
+                        llm: model,
+                        stick_with_model: true
+                    })
+                });
+                window.latestPreview = data;
 
-            // Update visualization controls visibility in this path too
-            try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
+                // Update visualization controls visibility depending on returned data
+                try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
 
-            // Do not show result area until confirm is clicked
-            document.getElementById('result').style.display = 'none';
+                // Panels are always visible now
+                window.goClicked = true;
 
-            // Show a short toast for immediate action results (send email, call api, etc.)
-            try {
-                if (data && data.type === 'action_completed') {
-                    displaySuccess(data.message || ('Action "' + (data.action || '') + '" completed'));
-                } else if (data && data.type === 'action_failed') {
-                    displayError(data.error || 'Action failed');
-                }
-            } catch (e) {
-                console.warn('action toast render error', e);
-            }
+                // If it's a cached or featured example, show the save button
+                if (data.cached || data.featured) {
+                    const saveBtn = document.getElementById('savePerfectBtn');
+                    if (saveBtn) {
+                        saveBtn.style.display = 'inline-block';
+                        saveBtn.title = data.cached ? 'Save successful history match as featured' : 'Save this featured example for auto-run';
+                        saveBtn.onclick = async () => {
+                        try {
+                            let type = data.cached ? 'history' : 'example';
+                            let result = await Swal.fire({
+                                title: 'Save Perfect Example',
+                                html: `
+                                        <div class="mb-3">Save this ${type} match as a perfect example. Auto-run means it will execute immediately without confirmation.</div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="swalAutoRun">
+                                            <label class="form-check-label" for="swalAutoRun">Auto-run without confirmation</label>
+                                        </div>`,
+                                showCancelButton: true,
+                                confirmButtonText: 'Save Example'
+                            });
 
-        } catch (error) {
-            console.error('Error:', error);
-            displayError('Error processing your command. Please try again.');
-            appendChat('assistant', 'Error processing your command.');
-        } finally {
-            button.disabled = false;
-            button.innerHTML = originalText;
-        }
-    });
-
-    // Populate example commands from settings
-    async function loadExamples() {
-        const list = document.getElementById('examplesList');
-        try {
-            const resp = await fetch('/api/settings/examples');
-            if (!resp.ok) {
-                let errText = await resp.text().catch(() => resp.statusText || 'Failed');
-                list.innerHTML = `<div class="text-danger">Failed to load examples: ${escapeHtml(errText)}</div><div class="mt-2"><button id="retryExamples" class="btn btn-sm btn-outline-secondary">Retry</button></div>`;
-                const retry = document.getElementById('retryExamples');
-                if (retry) retry.addEventListener('click', loadExamples);
-                return;
-            }
-            const data = await resp.json();
-            const examples = (data && data.examples) ? data.examples : [];
-            list.innerHTML = '';
-            if (!examples || examples.length === 0) {
-                list.innerHTML = '<div class="text-muted">No examples defined in settings. Add some in Settings → Training Data or Examples.</div>';
-                return;
-            }
-            examples.forEach(ex => {
-                const div = document.createElement('div');
-                div.className = 'example-item';
-                div.textContent = '➤ ' + ex;
-                div.addEventListener('click', () => setCommand(ex));
-                list.appendChild(div);
-            });
-        } catch (e) {
-            console.error('Failed to load examples', e);
-            list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
-        }
-    }
-
-    // Toggle DB Search panel
-    document.addEventListener('DOMContentLoaded', () => {
-        const dbPanel = document.getElementById('dbSearchPanel');
-        const toggleDb = document.getElementById('toggleDbSearch');
-        if (toggleDb && dbPanel) {
-            toggleDb.addEventListener('click', () => {
-                if (dbPanel.style.display === 'none' || dbPanel.style.display === '') {
-                    dbPanel.style.display = 'block';
-                    toggleDb.textContent = 'Hide';
-                } else {
-                    dbPanel.style.display = 'none';
-                    toggleDb.textContent = 'Show';
-                }
-            });
-        }
-
-        // Toggle results area
-        const toggleRes = document.getElementById('toggleResultBtn');
-        const resultDiv = document.getElementById('result');
-        if (toggleRes && resultDiv) {
-            toggleRes.addEventListener('click', () => {
-                if (resultDiv.style.display === 'none' || resultDiv.style.display === '') {
-                    resultDiv.style.display = 'block';
-                    toggleRes.textContent = 'Hide Results';
-                } else {
-                    resultDiv.style.display = 'none';
-                    toggleRes.textContent = 'Show Results';
-                }
-            });
-        }
-
-        // Load examples into UI
-        loadExamples();
-        // Initialize microphone speech-to-text
-        initSpeechToText();
-    });
-
-    // Speech to Text (Microphone) using Web Speech API
-    function initSpeechToText() {
-        const micBtn = document.getElementById('micBtn');
-        const input = document.getElementById('commandInput');
-        if (!micBtn || !input) return;
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            micBtn.style.display = 'none';
-            return;
-        }
-
-        let recog = null;
-        let listening = false;
-
-        function startRecognition() {
-            recog = new SpeechRecognition();
-            recog.lang = navigator.language || 'en-US';
-            recog.interimResults = true;
-            recog.maxAlternatives = 1;
-
-            let finalTranscript = '';
-            micBtn.classList.add('btn-danger');
-            micBtn.classList.remove('btn-outline-secondary');
-            micBtn.title = 'Listening... Click to stop';
-
-            recog.onresult = (event) => {
-                let interim = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    const r = event.results[i];
-                    if (r.isFinal) finalTranscript += r[0].transcript;
-                    else interim += r[0].transcript;
-                }
-                input.value = (finalTranscript + ' ' + interim).trim();
-            };
-
-            recog.onerror = (e) => {
-                console.error('Speech recognition error', e);
-                stopRecognition();
-                alert('Speech recognition error: ' + (e.error || 'unknown'));
-            };
-
-            recog.onend = () => {
-                stopRecognition();
-            };
-
-            recog.start();
-            listening = true;
-        }
-
-        function stopRecognition() {
-            if (recog) {
-                try { recog.stop(); } catch (e) { }
-                recog = null;
-            }
-            listening = false;
-            micBtn.classList.remove('btn-danger');
-            micBtn.classList.add('btn-outline-secondary');
-            micBtn.title = 'Speak your command';
-        }
-
-        micBtn.addEventListener('click', () => {
-            if (!listening) startRecognition(); else stopRecognition();
-        });
-    }
-
-    // SQL collapse toggle handler. Editor is collapsed by default; user expands it.
-    const toggleSqlBtn = document.getElementById('toggleSql') || document.getElementById('toggleSqlBelow');
-    if (toggleSqlBtn) {
-        toggleSqlBtn.addEventListener('click', () => {
-            const editor = document.getElementById('sqlEditor');
-            const btn = toggleSqlBtn;
-            if (!editor) return;
-            if (editor.style.display === 'none' || editor.style.display === '') {
-                editor.style.display = 'block';
-                btn.textContent = 'Collapse SQL';
-            } else {
-                editor.style.display = 'none';
-                btn.textContent = 'Show SQL';
-            }
-        });
-    }
-
-
-    // Enable Confirm button if there is SQL in the editor
-    const sqlEditor = document.getElementById('sqlEditor');
-    const confirmBtn = document.getElementById('confirmBtn');
-    function updateConfirmBtnState() {
-        // Confirm button is always enabled if there's a preview or SQL
-        const sqlVal = sqlEditor.value && sqlEditor.value.trim();
-        const hasPreview = window.latestPreview && Object.keys(window.latestPreview).length > 0;
-        confirmBtn.disabled = false; // Always enabled
-        if (sqlVal || hasPreview) {
-            confirmBtn.classList.remove('btn-secondary');
-            confirmBtn.classList.add('btn-success');
-        } else {
-            confirmBtn.classList.remove('btn-success');
-            confirmBtn.classList.add('btn-secondary');
-        }
-    }
-    sqlEditor.addEventListener('input', updateConfirmBtnState);
-    updateConfirmBtnState();
-
-    document.getElementById('confirmBtn').addEventListener('click', async () => {
-        // Support both SQL and non-SQL actions (like send_email)
-        const preview = window.latestPreview || {};
-        const historyId = preview._history_id || preview.history_id || null;
-        const editedSql = document.getElementById('sqlEditor').value;
-        const commandText = document.getElementById('commandInput').value;
-        let payload = { command: commandText };
-        if (historyId) payload.history_id = historyId;
-
-        // If this is an action (like send_email), send the action object; otherwise, send SQL
-        if (preview && preview.type && preview.type.startsWith('action') && preview.action) {
-            payload.action = preview.action;
-            // Only include SQL if present and not empty
-            if (editedSql && editedSql.trim()) payload.sql = editedSql.trim();
-        } else {
-            // For SQL or query actions, require SQL
-            if (!editedSql || !editedSql.trim()) {
-                alert('Please enter SQL to execute.');
-                return;
-            }
-            payload.sql = editedSql.trim();
-        }
-
-        try {
-            const confirmResultEl = document.getElementById('confirmResult');
-            confirmResultEl.innerHTML = `<div class="alert alert-info">Generating result — this may take a few seconds...</div>`;
-            const confirmBtnEl = document.getElementById('confirmBtn');
-            if (confirmBtnEl) confirmBtnEl.disabled = true;
-
-            const resp = await fetch('/api/confirm', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const res = await resp.json();
-            // clear temporary message and re-enable
-            confirmResultEl.innerHTML = '';
-            if (confirmBtnEl) confirmBtnEl.disabled = false;
-
-            if (res.error) {
-                // Show error with explanation and attempt auto-retry
-                const errorMsg = res.error || 'Execution error';
-                const errorDetails = res.error_details || res.explanation || '';
-
-                // Create error display with details
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error-message mb-3';
-                errorDiv.innerHTML = `
-                    <div><i class="fas fa-exclamation-circle"></i> ${escapeHtml(errorMsg)}</div>
-                    ${errorDetails ? `<div class="small mt-2">${escapeHtml(errorDetails)}</div>` : ''}
-                `;
-                confirmResultEl.appendChild(errorDiv);
-
-                // If this looks like an SQL error, try to auto-correct with LLM
-                if (payload.sql && (errorMsg.toLowerCase().includes('sql') || errorDetails.toLowerCase().includes('sql'))) {
-                    try {
-                        // Show retry attempt
-                        const retryDiv = document.createElement('div');
-                        retryDiv.className = 'alert alert-info mt-2';
-                        retryDiv.innerHTML = `<i class="fas fa-sync-alt"></i> Attempting to fix the SQL error...`;
-                        confirmResultEl.appendChild(retryDiv);
-
-                        // Call LLM to fix SQL
-                        const fixResp = await fetch('/api/fix_sql', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                sql: payload.sql,
-                                error: errorMsg,
-                                details: errorDetails,
-                                command: payload.command
-                            })
-                        });
-                        const fixRes = await fixResp.json();
-
-                        if (fixRes.fixed_sql) {
-                            // Show the fix and explanation
-                            retryDiv.className = 'alert alert-success mt-2';
-                            retryDiv.innerHTML = `
-                                <div><i class="fas fa-check-circle"></i> Fixed SQL Available:</div>
-                                <div class="small mt-2">${escapeHtml(fixRes.explanation || '')}</div>
-                                <pre class="mt-2">${escapeHtml(fixRes.fixed_sql)}</pre>
-                                <button class="btn btn-sm btn-primary mt-2" onclick="applySqlFix(${JSON.stringify(fixRes.fixed_sql)})">
-                                    Apply Fix & Retry
-                                </button>
-                            `;
-                        } else {
-                            retryDiv.className = 'alert alert-warning mt-2';
-                            retryDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Couldn't automatically fix the SQL error.`;
+                            if (!result.isConfirmed) return;
+                            const autoRun = document.getElementById('swalAutoRun').checked;
+                            await fetchJson('/api/settings/examples', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    examples: [{
+                                        text: command,
+                                        sql: data.sql,
+                                        featured: true,
+                                        auto_run: autoRun,
+                                        preview: data
+                                    }]
+                                })
+                            });
+                            Swal.fire({ icon: 'success', title: 'Example saved!', text: autoRun ? 'Next time this will run without confirmation.' : 'Example saved as featured.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
+                        } catch (e) {
+                            console.error('Save failed', e);
+                            Swal.fire({ icon: 'error', title: 'Save Failed', text: e.payload?.error || e.message, toast: true, position: 'top-end', timer: 4000 });
                         }
-                    } catch (retryErr) {
-                        console.error('Auto-fix attempt failed:', retryErr);
+                        };
                     }
                 }
-            } else {
-                // Render formatted payload if present, otherwise show a short success / result summary
-                if (res.formatted && (res.formatted.content || res.formatted.content_type)) {
-                    try {
-                        if (res.formatted.content_type === 'text/html' || res.formatted.format === 'tabular') {
-                            confirmResultEl.innerHTML = res.formatted.content || '';
-                            try { enhanceTablesIn(confirmResultEl); } catch (e) { console.warn('enhanceTablesIn error', e); }
-                        } else if (res.formatted.format === 'csv' || res.formatted.content_type === 'text/csv') {
-                            confirmResultEl.innerHTML = `<pre>${escapeHtml(res.formatted.content || '')}</pre><a class='btn btn-sm btn-primary mt-2' href='data:text/csv;charset=utf-8,${encodeURIComponent(res.formatted.content || "")}' download='results.csv'>Download CSV</a>`;
-                        } else if (res.formatted.format === 'chart') {
-                            // For simplicity, show JSON descriptor and let user view full results in main area
-                            confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res.formatted.content || {}, null, 2))}</pre>`;
-                        } else if (res.formatted.content && (res.formatted.format === 'pdf' || res.formatted.format === 'image' || res.formatted.format === 'excel')) {
-                            // Provide a download link for base64 content
-                            const b64 = res.formatted.content;
-                            const filename = res.formatted.filename || ('results.' + (res.formatted.format === 'pdf' ? 'pdf' : 'bin'));
-                            confirmResultEl.innerHTML = `<a class='btn btn-sm btn-primary' download='${escapeHtml(filename)}' href='data:${escapeHtml(res.formatted.content_type || 'application/octet-stream')};base64,${escapeHtml(b64)}'>Download ${escapeHtml(filename)}</a>`;
+
+                // Render assistant response in chat and keep SQL editor populated if present.
+                try {
+                    // Always show all explanations, reasoning, and business rules in the chat only
+                    if (data.type === 'chat_response') {
+                        appendChat('assistant', data.response || '');
+                        // Only put SQL in the editor if present and ONLY if it's a valid SQL string
+                        if (data.sql && typeof data.sql === 'string') {
+                            document.getElementById('sqlEditor').value = data.sql;
                         } else {
-                            // fallback to stringified result
+                            document.getElementById('sqlEditor').value = '';
+                        }
+                    } else if (data.type === 'clarify') {
+                        // Show clarifier modal and a short assistant prompt
+                        try { appendChat('assistant', data.prompt || 'Please select which table(s) to use.'); } catch (e) { }
+                        showClarifyModal(data.candidates || [], command);
+                    } else if (data.type === 'query_preview' || data.type === 'action_preview') {
+                        // Show all explanations, business rules, and reasoning in the chat
+                        const assistantText = [
+                            data.explanation,
+                            data.sql_explanation,
+                            data.planned_action
+                        ].filter(Boolean).join('<br>');
+                        // Compose a detailed action summary for the user
+                        let actionSummary = '';
+                        if (data.action_details) {
+                            actionSummary = data.action_details;
+                        } else if (data.sql) {
+                            actionSummary = `The following SQL will be executed: <pre>${escapeHtml(data.sql)}</pre>`;
+                        } else if (data.planned_action) {
+                            actionSummary = data.planned_action;
+                        } else if (data.explanation) {
+                            actionSummary = data.explanation;
+                        } else {
+                            actionSummary = 'A database or API action will be performed.';
+                        }
+                        appendChat('assistant', assistantText, actionSummary);
+                        // Only put SQL in the editor if present and ONLY if it's a valid SQL string
+                        if (data.sql && typeof data.sql === 'string') {
+                            document.getElementById('sqlEditor').value = data.sql;
+                        } else {
+                            document.getElementById('sqlEditor').value = '';
+                        }
+                        // if there was a validation error, show as error in result
+                        if (data.error) {
+                            // Pass full payload so staging UI can show details and stage
+                            const payload = Object.assign({}, data);
+                            payload.error = 'SQL validation: ' + (data.error || '');
+                            displayError(payload);
+                        }
+                    } else {
+                        // For results or other responses, show a short assistant note
+                        const note = data.explanation || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
+                        appendChat('assistant', note || 'Result returned.');
+                    }
+                } catch (e) { console.warn('chat render error', e); }
+
+                // Update visualization controls visibility in this path too
+                try { updateVizControlsVisibility(data); } catch (e) { console.warn('viz update failed', e); }
+
+                // Do not show result area until confirm is clicked
+                document.getElementById('result').style.display = 'none';
+
+                // Show a short toast for immediate action results (send email, call api, etc.)
+                try {
+                    if (data && data.type === 'action_completed') {
+                        displaySuccess(data.message || ('Action "' + (data.action || '') + '" completed'));
+                    } else if (data && data.type === 'action_failed') {
+                        displayError(data.error || 'Action failed');
+                    }
+                } catch (e) {
+                    console.warn('action toast render error', e);
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                displayError('Error processing your command. Please try again.');
+                appendChat('assistant', 'Error processing your command.');
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        });
+
+        // Populate example commands from settings
+        async function loadExamples() {
+            const list = document.getElementById('examplesList');
+            try {
+                const data = await fetchJson('/api/settings/examples');
+                const examples = (data && data.examples) ? data.examples : [];
+                list.innerHTML = '';
+                if (!examples || examples.length === 0) {
+                    list.innerHTML = '<div class="text-muted">No examples defined in settings. Add some in Settings → Training Data or Examples.</div>';
+                    return;
+                }
+                examples.forEach(ex => {
+                    const div = document.createElement('div');
+                    div.className = 'example-item';
+                    div.textContent = '➤ ' + ex;
+                    div.addEventListener('click', () => setCommand(ex));
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error('Failed to load examples', e);
+                list.innerHTML = '<div class="text-danger">Failed to load examples</div>';
+            }
+        }
+
+        // Toggle DB Search panel
+        document.addEventListener('DOMContentLoaded', () => {
+            const dbPanel = document.getElementById('dbSearchPanel');
+            const toggleDb = document.getElementById('toggleDbSearch');
+            if (toggleDb && dbPanel) {
+                toggleDb.addEventListener('click', () => {
+                    if (dbPanel.style.display === 'none' || dbPanel.style.display === '') {
+                        dbPanel.style.display = 'block';
+                        toggleDb.textContent = 'Hide';
+                    } else {
+                        dbPanel.style.display = 'none';
+                        toggleDb.textContent = 'Show';
+                    }
+                });
+            }
+
+            // Toggle results area
+            const toggleRes = document.getElementById('toggleResultBtn');
+            const resultDiv = document.getElementById('result');
+            if (toggleRes && resultDiv) {
+                toggleRes.addEventListener('click', () => {
+                    if (resultDiv.style.display === 'none' || resultDiv.style.display === '') {
+                        resultDiv.style.display = 'block';
+                        toggleRes.textContent = 'Hide Results';
+                    } else {
+                        resultDiv.style.display = 'none';
+                        toggleRes.textContent = 'Show Results';
+                    }
+                });
+            }
+
+            // Load examples into UI
+            loadExamples();
+            // Initialize microphone speech-to-text
+            initSpeechToText();
+        });
+
+        // Speech to Text (Microphone) using Web Speech API
+        function initSpeechToText() {
+            const micBtn = document.getElementById('micBtn');
+            const input = document.getElementById('commandInput');
+            if (!micBtn || !input) return;
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                micBtn.style.display = 'none';
+                return;
+            }
+
+            let recog = null;
+            let listening = false;
+
+            function startRecognition() {
+                recog = new SpeechRecognition();
+                recog.lang = navigator.language || 'en-US';
+                recog.interimResults = true;
+                recog.maxAlternatives = 1;
+
+                let finalTranscript = '';
+                micBtn.classList.add('btn-danger');
+                micBtn.classList.remove('btn-outline-secondary');
+                micBtn.title = 'Listening... Click to stop';
+
+                recog.onresult = (event) => {
+                    let interim = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        const r = event.results[i];
+                        if (r.isFinal) finalTranscript += r[0].transcript;
+                        else interim += r[0].transcript;
+                    }
+                    input.value = (finalTranscript + ' ' + interim).trim();
+                };
+
+                recog.onerror = (e) => {
+                    console.error('Speech recognition error', e);
+                    stopRecognition();
+                    Swal.fire({ icon: 'error', title: 'Speech recognition error', text: (e.error || 'unknown'), toast: true, position: 'top-end', timer: 4000, showConfirmButton: false });
+                };
+
+                recog.onend = () => {
+                    stopRecognition();
+                };
+
+                recog.start();
+                listening = true;
+            }
+
+            function stopRecognition() {
+                if (recog) {
+                    try { recog.stop(); } catch (e) { }
+                    recog = null;
+                }
+                listening = false;
+                micBtn.classList.remove('btn-danger');
+                micBtn.classList.add('btn-outline-secondary');
+                micBtn.title = 'Speak your command';
+            }
+
+            micBtn.addEventListener('click', () => {
+                if (!listening) startRecognition(); else stopRecognition();
+            });
+        }
+
+        // SQL collapse toggle handler. Editor is collapsed by default; user expands it.
+        const toggleSqlBtn = document.getElementById('toggleSql') || document.getElementById('toggleSqlBelow');
+        if (toggleSqlBtn) {
+            toggleSqlBtn.addEventListener('click', () => {
+                const editor = document.getElementById('sqlEditor');
+                const btn = toggleSqlBtn;
+                if (!editor) return;
+                if (editor.style.display === 'none' || editor.style.display === '') {
+                    editor.style.display = 'block';
+                    btn.textContent = 'Collapse SQL';
+                } else {
+                    editor.style.display = 'none';
+                    btn.textContent = 'Show SQL';
+                }
+            });
+        }
+
+
+        // Enable Confirm button if there is SQL in the editor
+        const sqlEditor = document.getElementById('sqlEditor');
+        const confirmBtn = document.getElementById('confirmBtn');
+        function updateConfirmBtnState() {
+            // Confirm button is always enabled if there's a preview or SQL
+            const sqlVal = sqlEditor.value && sqlEditor.value.trim();
+            const hasPreview = window.latestPreview && Object.keys(window.latestPreview).length > 0;
+            confirmBtn.disabled = false; // Always enabled
+            if (sqlVal || hasPreview) {
+                confirmBtn.classList.remove('btn-secondary');
+                confirmBtn.classList.add('btn-success');
+            } else {
+                confirmBtn.classList.remove('btn-success');
+                confirmBtn.classList.add('btn-secondary');
+            }
+        }
+        sqlEditor.addEventListener('input', updateConfirmBtnState);
+        updateConfirmBtnState();
+
+        document.getElementById('confirmBtn').addEventListener('click', async () => {
+            // Support both SQL and non-SQL actions (like send_email)
+            const preview = window.latestPreview || {};
+            const historyId = preview._history_id || preview.history_id || null;
+            const editedSql = document.getElementById('sqlEditor').value;
+            const commandText = document.getElementById('commandInput').value;
+            let payload = { command: commandText };
+            if (historyId) payload.history_id = historyId;
+
+            // If this is an action (like send_email), send the action object; otherwise, send SQL
+            if (preview && preview.type && preview.type.startsWith('action') && preview.action) {
+                payload.action = preview.action;
+                // Only include SQL if present and not empty
+                if (editedSql && editedSql.trim()) payload.sql = editedSql.trim();
+            } else {
+                // For SQL or query actions, require SQL
+                if (!editedSql || !editedSql.trim()) {
+                    Swal.fire({ icon: 'warning', title: 'No SQL', text: 'Please enter SQL to execute.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
+                    return;
+                }
+                payload.sql = editedSql.trim();
+            }
+
+            try {
+                const confirmResultEl = document.getElementById('confirmResult');
+                confirmResultEl.innerHTML = `<div class="alert alert-info">Generating result — this may take a few seconds...</div>`;
+                const confirmBtnEl = document.getElementById('confirmBtn');
+                if (confirmBtnEl) confirmBtnEl.disabled = true;
+
+                const model = await resolveSelectedLLM();
+                const res = await fetchJson('/api/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({}, payload, { llm: model, stick_with_model: true }))
+                });
+                // clear temporary message and re-enable
+                confirmResultEl.innerHTML = '';
+                if (confirmBtnEl) confirmBtnEl.disabled = false;
+
+                if (res.error) {
+                    // Show error with explanation using SweetAlert
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Execution Failed',
+                        html: `
+                            <div class="mb-3">${escapeHtml(res.error || 'Execution error')}</div>
+                            ${res.error_details ? `<div class="text-muted mb-2">${escapeHtml(res.error_details)}</div>` : ''}
+                            ${res.explanation ? `<div class="text-muted">${escapeHtml(res.explanation)}</div>` : ''}
+                            ${res.stage ? `<div class="text-info">Stage: ${escapeHtml(res.stage)}</div>` : ''}
+                            ${res.traceback ? `
+                                <div class="mt-3">
+                                    <button onclick="this.nextElementSibling.classList.toggle('d-none')" class="btn btn-sm btn-outline-secondary">Show Traceback</button>
+                                    <pre class="d-none mt-2 text-start" style="font-size: 0.8em; background: #f8f9fa; padding: 1em; border-radius: 4px;">${escapeHtml(res.traceback)}</pre>
+                                </div>` : ''}`
+                    });
+
+                    // If this looks like an SQL error, try to auto-correct with LLM
+                    if (payload.sql && ((res.error || '').toString().toLowerCase().includes('sql') || (res.error_details || '').toString().toLowerCase().includes('sql'))) {
+                        try {
+                            // Show retry attempt
+                            const retryDiv = document.createElement('div');
+                            retryDiv.className = 'alert alert-info mt-2';
+                            retryDiv.innerHTML = `<i class="fas fa-sync-alt"></i> Attempting to fix the SQL error...`;
+                            confirmResultEl.appendChild(retryDiv);
+
+                            // Call LLM to fix SQL
+                            const fixRes = await fetchJson('/api/fix_sql', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    sql: payload.sql,
+                                    error: res.error,
+                                    details: res.error_details,
+                                    command: payload.command
+                                })
+                            });
+
+                            if (fixRes.fixed_sql) {
+                                // Show the fix and explanation
+                                retryDiv.className = 'alert alert-success mt-2';
+                                retryDiv.innerHTML = `
+                                    <div><i class="fas fa-check-circle"></i> Fixed SQL Available:</div>
+                                    <div class="small mt-2">${escapeHtml(fixRes.explanation || '')}</div>
+                                    <pre class="mt-2">${escapeHtml(fixRes.fixed_sql)}</pre>
+                                `;
+                                // Create Apply button via DOM to avoid injecting JSON into a template literal (prevents brace/templating parsing issues)
+                                const applyBtn = document.createElement('button');
+                                applyBtn.className = 'btn btn-sm btn-primary mt-2';
+                                applyBtn.textContent = 'Apply Fix & Retry';
+                                applyBtn.addEventListener('click', () => applySqlFix(fixRes.fixed_sql));
+                                retryDiv.appendChild(applyBtn);
+                            } else {
+                                retryDiv.className = 'alert alert-warning mt-2';
+                                retryDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Couldn't automatically fix the SQL error.`;
+                            }
+                        } catch (retryErr) {
+                            console.error('Auto-fix attempt failed:', retryErr);
+                        }
+                    }
+                } else {
+                    // Render formatted payload if present, otherwise show a short success / result summary
+                    if (res.formatted && (res.formatted.content || res.formatted.content_type)) {
+                        try {
+                            if (res.formatted.content_type === 'text/html' || res.formatted.format === 'tabular') {
+                                confirmResultEl.innerHTML = res.formatted.content || '';
+                                try { enhanceTablesIn(confirmResultEl); } catch (e) { console.warn('enhanceTablesIn error', e); }
+                            } else if (res.formatted.format === 'csv' || res.formatted.content_type === 'text/csv') {
+                                confirmResultEl.innerHTML = `<pre>${escapeHtml(res.formatted.content || '')}</pre><a class='btn btn-sm btn-primary mt-2' href='data:text/csv;charset=utf-8,${encodeURIComponent(res.formatted.content || "")}' download='results.csv'>Download CSV</a>`;
+                            } else if (res.formatted.format === 'chart') {
+                                // For simplicity, show JSON descriptor and let user view full results in main area
+                                confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res.formatted.content || {}, null, 2))}</pre>`;
+                            } else if (res.formatted.content && (res.formatted.format === 'pdf' || res.formatted.format === 'image' || res.formatted.format === 'excel')) {
+                                // Provide a download link for base64 content
+                                const b64 = res.formatted.content;
+                                const filename = res.formatted.filename || ('results.' + (res.formatted.format === 'pdf' ? 'pdf' : 'bin'));
+                                confirmResultEl.innerHTML = `<a class='btn btn-sm btn-primary' download='${escapeHtml(filename)}' href='data:${escapeHtml(res.formatted.content_type || 'application/octet-stream')};base64,${escapeHtml(b64)}'>Download ${escapeHtml(filename)}</a>`;
+                            } else {
+                                // fallback to stringified result
+                                confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
+                            }
+                        } catch (e) {
+                            console.error('Error rendering confirm formatted result', e);
                             confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
                         }
-                    } catch (e) {
-                        console.error('Error rendering confirm formatted result', e);
-                        confirmResultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(res, null, 2))}</pre>`;
-                    }
-                } else {
-                    // No formatted payload provided — show brief structured result
-                    if (res.results) {
-                        // Do NOT auto-render tables. Show an explicit button to display results.
-                        const rows = Array.isArray(res.results) ? res.results : [];
-                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Query executed successfully. ${rows.length} rows available.</div>`;
-                        if (rows.length > 0) {
-                            const btn = document.createElement('button');
-                            btn.className = 'btn btn-sm btn-outline-primary';
-                            btn.textContent = `Show ${Math.min(100, rows.length)} rows as table`;
-                            btn.addEventListener('click', () => {
-                                // Render up to 100 rows when user explicitly requests
-                                const toShow = rows.slice(0, 100);
-                                const container = document.createElement('div');
-                                displayTable(toShow, container);
-                                confirmResultEl.appendChild(container);
-                            });
-                            confirmResultEl.appendChild(btn);
-                        }
                     } else {
-                        confirmResultEl.innerHTML = `<div class='alert alert-success'>Action executed successfully.</div>`;
+                        // No formatted payload provided — show brief structured result
+                        if (res.results) {
+                            // Do NOT auto-render tables. Show an explicit button to display results.
+                            const rows = Array.isArray(res.results) ? res.results : [];
+                            confirmResultEl.innerHTML = `<div class='alert alert-success'>Query executed successfully. ${rows.length} rows available.</div>`;
+                            if (rows.length > 0) {
+                                const btn = document.createElement('button');
+                                btn.className = 'btn btn-sm btn-outline-primary';
+                                btn.textContent = `Show ${Math.min(100, rows.length)} rows as table`;
+                                btn.addEventListener('click', () => {
+                                    // Render up to 100 rows when user explicitly requests
+                                    const toShow = rows.slice(0, 100);
+                                    const container = document.createElement('div');
+                                    displayTable(toShow, container);
+                                    confirmResultEl.appendChild(container);
+                                });
+                                confirmResultEl.appendChild(btn);
+                            }
+                        } else {
+                            confirmResultEl.innerHTML = `<div class='alert alert-success'>Action executed successfully.</div>`;
+                        }
                     }
-                }
 
-                // Also update main result area and refresh history
-                displayResult(res);
-                // If this was a confirmed action, clear the pending preview state and restore history
-                try {
-                    window.pendingConfirmation = false;
-                    const historyPane = document.getElementById('historyList');
-                    if (historyPane) historyPane.style.display = historyPane.dataset._wasVisible === '1' ? 'block' : '';
-                    const previewBanner = document.getElementById('previewBanner');
-                    if (previewBanner) previewBanner.style.display = 'none';
-                } catch (e) { console.warn('restore history UI error', e); }
-                loadHistory();
-            }
-        } catch (e) {
-            console.error(e);
-            displayError('Failed to confirm action.');
-        }
-    });
-
-    const executeRaw = document.getElementById('executeRawBtnBelow') || document.getElementById('executeRawBtn');
-    if (executeRaw) {
-        executeRaw.addEventListener('click', async () => {
-            const sql = document.getElementById('sqlEditor').value;
-            if (!sql) { alert('No SQL to execute'); return; }
-            const ok = confirm('Execute raw SQL now? This will run the SQL against the database. Proceed?');
-            if (!ok) return;
-            try {
-                const resp = await fetch('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
-                const data = await resp.json();
-                if (data.error) {
-                    displayError(data.error);
-                } else {
-                    displayResult({ type: 'query_result', sql, results: data });
+                    // Also update main result area and refresh history
+                    displayResult(res);
+                    // If this was a confirmed action, clear the pending preview state and restore history
+                    try {
+                        window.pendingConfirmation = false;
+                        const historyPane = document.getElementById('historyList');
+                        if (historyPane) historyPane.style.display = historyPane.dataset._wasVisible === '1' ? 'block' : '';
+                        const previewBanner = document.getElementById('previewBanner');
+                        if (previewBanner) previewBanner.style.display = 'none';
+                    } catch (e) { console.warn('restore history UI error', e); }
+                    loadHistory();
                 }
             } catch (e) {
                 console.error(e);
-                displayError('Failed to execute SQL');
+                displayError({ error: 'Failed to confirm action', details: String(e), stage: 'confirm_ui' });
             }
         });
-    }
 
-    // Enhanced: Always draw a chart if the user requested a chart, even if backend did not return chart format
-    function displayResult(data) {
-        const resultDiv = document.getElementById('confirmResult');
-        resultDiv.innerHTML = '';
-        if (!data) return;
-        if (data.error) {
-            displayError(data.error);
-            return;
-        }
-
-        // Always put SQL into the editor if present
-        const editor = document.getElementById('sqlEditor');
-        if (data.sql) {
-            editor.value = data.sql;
-        }
-
-        // View mode toggles
-        let tabularData = null;
-        if (data.formatted && (data.formatted.format === 'tabular' || data.formatted.content_type === 'text/html') && data.formatted.content) {
-            // Try to extract data from HTML table
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = data.formatted.content;
-            const table = tempDiv.querySelector('table');
-            if (table) {
-                const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
-                const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
-                    const cells = Array.from(tr.querySelectorAll('td'));
-                    const obj = {};
-                    cells.forEach((td, i) => {
-                        obj[headers[i] || `col${i}`] = isNaN(td.textContent.trim()) ? td.textContent.trim() : Number(td.textContent.trim());
-                    });
-                    return obj;
-                });
-                if (rows.length > 0) tabularData = rows;
-            }
-        } else if (Array.isArray(data.results) && data.results.length > 0) {
-            tabularData = data.results;
-        } else if (Array.isArray(data.data) && data.data.length > 0) {
-            tabularData = data.data;
-        }
-
-        // If tabular data is available, auto-render according to requested format
-        if (tabularData && tabularData.length > 0) {
-            // Determine desired format: prefer server-provided formatted.format, else inspect user's last command
-            let requestedFormat = (data.formatted && data.formatted.format) ? data.formatted.format : null;
-            const cmd = (window.latestCommand || '').toLowerCase();
-            if (!requestedFormat) {
-                if (cmd.includes('chart') || cmd.includes('plot') || cmd.includes('graph')) requestedFormat = 'chart';
-                else if (cmd.includes('analysis') || cmd.includes('analyze') || cmd.includes('summar')) requestedFormat = 'analysis';
-                else if (cmd.includes('csv') || cmd.includes('download') || cmd.includes('excel')) requestedFormat = 'csv';
-                else requestedFormat = 'table';
-            }
-
-            if (requestedFormat === 'chart') {
-                // If presentation hint indicates a specific chart type, respect it (e.g., pie)
+        const executeRaw = document.getElementById('executeRawBtnBelow') || document.getElementById('executeRawBtn');
+        if (executeRaw) {
+            executeRaw.addEventListener('click', async () => {
+                const sql = document.getElementById('sqlEditor').value;
+                if (!sql) { Swal.fire({ icon: 'warning', title: 'No SQL', text: 'No SQL to execute', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false }); return; }
+                const ok = confirm('Execute raw SQL now? This will run the SQL against the database. Proceed?');
+                if (!ok) return;
                 try {
-                    const pres = (data.presentation_hint || (data.formatted && data.formatted.presentation)) || null;
-                    let chartType = 'bar';
-                    if (pres && pres.type) chartType = pres.type;
-                    // Render pie if indicated
-                    if (chartType === 'pie' || (pres && pres.display === 'pie')) {
+                    const data = await fetchJson('/api/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+                    if (data.error) {
+                        displayError(data);
+                    } else {
+                        displayResult({ type: 'query_result', sql, results: data });
+                    }
+                } catch (e) {
+                    console.error(e);
+                    displayError('Failed to execute SQL');
+                }
+            });
+        }
+
+        // Enhanced: Always draw a chart if the user requested a chart, even if backend did not return chart format
+        function displayResult(data) {
+            const resultDiv = document.getElementById('confirmResult');
+            resultDiv.innerHTML = '';
+            if (!data) return;
+            if (data.error) {
+                displayError(data);
+                return;
+            }
+
+            // Always put SQL into the editor if present
+            const editor = document.getElementById('sqlEditor');
+            if (data.sql) {
+                editor.value = data.sql;
+            }
+
+            // View mode toggles
+            let tabularData = null;
+            if (data.formatted && (data.formatted.format === 'tabular' || data.formatted.content_type === 'text/html') && data.formatted.content) {
+                // Try to extract data from HTML table
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = data.formatted.content;
+                const table = tempDiv.querySelector('table');
+                if (table) {
+                    const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+                    const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+                        const cells = Array.from(tr.querySelectorAll('td'));
+                        const obj = {};
+                        cells.forEach((td, i) => {
+                            obj[headers[i] || `col${i}`] = isNaN(td.textContent.trim()) ? td.textContent.trim() : Number(td.textContent.trim());
+                        });
+                        return obj;
+                    });
+                    if (rows.length > 0) tabularData = rows;
+                }
+            } else if (Array.isArray(data.results) && data.results.length > 0) {
+                tabularData = data.results;
+            } else if (Array.isArray(data.data) && data.data.length > 0) {
+                tabularData = data.data;
+            }
+
+            // If tabular data is available, auto-render according to requested format
+            if (tabularData && tabularData.length > 0) {
+                // Determine desired format: prefer server-provided formatted.format, else inspect user's last command
+                let requestedFormat = (data.formatted && data.formatted.format) ? data.formatted.format : null;
+                const cmd = (window.latestCommand || '').toLowerCase();
+                if (!requestedFormat) {
+                    if (cmd.includes('chart') || cmd.includes('plot') || cmd.includes('graph')) requestedFormat = 'chart';
+                    else if (cmd.includes('analysis') || cmd.includes('analyze') || cmd.includes('summar')) requestedFormat = 'analysis';
+                    else if (cmd.includes('csv') || cmd.includes('download') || cmd.includes('excel')) requestedFormat = 'csv';
+                    else requestedFormat = 'table';
+                }
+
+                if (requestedFormat === 'chart') {
+                    // If presentation hint indicates a specific chart type, respect it (e.g., pie)
+                    try {
+                        const pres = (data.presentation_hint || (data.formatted && data.formatted.presentation)) || null;
+                        let chartType = 'bar';
+                        if (pres && pres.type) chartType = pres.type;
+                        // Render pie if indicated
+                        if (chartType === 'pie' || (pres && pres.display === 'pie')) {
+                            const keys = Object.keys(tabularData[0]);
+                            const labelKey = keys[0];
+                            const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                            const chartContainer = document.createElement('div');
+                            const canvas = document.createElement('canvas');
+                            canvas.style.maxHeight = '400px';
+                            chartContainer.appendChild(canvas);
+                            resultDiv.appendChild(chartContainer);
+                            new Chart(canvas.getContext('2d'), {
+                                type: 'pie',
+                                data: {
+                                    labels: tabularData.map(row => row[labelKey]),
+                                    datasets: [{ data: tabularData.map(row => row[valueKey]), backgroundColor: tabularData.map((_, i) => `hsl(${(i * 40) % 360} 70% 50%)`) }]
+                                },
+                                options: { responsive: true, maintainAspectRatio: false }
+                            });
+                            return;
+                        }
+
+                        // Fallback to bar chart
                         const keys = Object.keys(tabularData[0]);
                         const labelKey = keys[0];
                         const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
@@ -1200,1109 +1336,1109 @@
                         chartContainer.appendChild(canvas);
                         resultDiv.appendChild(chartContainer);
                         new Chart(canvas.getContext('2d'), {
-                            type: 'pie',
+                            type: 'bar',
                             data: {
                                 labels: tabularData.map(row => row[labelKey]),
-                                datasets: [{ data: tabularData.map(row => row[valueKey]), backgroundColor: tabularData.map((_, i) => `hsl(${(i * 40) % 360} 70% 50%)`) }]
+                                datasets: [{ label: valueKey, data: tabularData.map(row => row[valueKey]), backgroundColor: '#3498db' }]
                             },
                             options: { responsive: true, maintainAspectRatio: false }
                         });
                         return;
-                    }
-
-                    // Fallback to bar chart
-                    const keys = Object.keys(tabularData[0]);
-                    const labelKey = keys[0];
-                    const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
-                    const chartContainer = document.createElement('div');
-                    const canvas = document.createElement('canvas');
-                    canvas.style.maxHeight = '400px';
-                    chartContainer.appendChild(canvas);
-                    resultDiv.appendChild(chartContainer);
-                    new Chart(canvas.getContext('2d'), {
-                        type: 'bar',
-                        data: {
-                            labels: tabularData.map(row => row[labelKey]),
-                            datasets: [{ label: valueKey, data: tabularData.map(row => row[valueKey]), backgroundColor: '#3498db' }]
-                        },
-                        options: { responsive: true, maintainAspectRatio: false }
-                    });
-                    return;
-                } catch (e) {
-                    console.warn('chart render failed', e);
-                }
-            } else if (requestedFormat === 'analysis') {
-                const analysisContainer = document.createElement('div');
-                resultDiv.appendChild(analysisContainer);
-                let summary = `<b>Analysis & Comparisons:</b><br>`;
-                summary += `Rows: ${tabularData.length}<br>`;
-                const keys = Object.keys(tabularData[0]);
-                const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
-                if (valueKey) {
-                    const values = tabularData.map(row => Number(row[valueKey])).filter(v => !isNaN(v));
-                    if (values.length > 0) {
-                        const min = Math.min(...values);
-                        const max = Math.max(...values);
-                        const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
-                        summary += `Min ${valueKey}: ${min}<br>Max ${valueKey}: ${max}<br>Avg ${valueKey}: ${avg}<br>`;
-                    }
-                }
-                analysisContainer.innerHTML = summary;
-                return;
-            } else if (requestedFormat === 'csv') {
-                // Build CSV and provide download link
-                const cols = Object.keys(tabularData[0]);
-                const rows = [cols.join(',')].concat(tabularData.map(r => cols.map(c => '"' + String(r[c] === undefined ? '' : r[c]).replace(/"/g, '""') + '"').join(',')));
-                const csv = rows.join('\n');
-                const dl = document.createElement('a');
-                dl.className = 'btn btn-sm btn-primary';
-                dl.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-                dl.download = 'results.csv';
-                dl.textContent = 'Download CSV';
-                resultDiv.appendChild(dl);
-                return;
-            } else {
-                // Default: render table
-                displayTable(tabularData, resultDiv);
-                return;
-            }
-        }
-
-        // Fallback: show table or text as before
-        if (data.formatted && (data.formatted.content_type === 'text/html' || data.formatted.format === 'tabular')) {
-            resultDiv.innerHTML = data.formatted.content || '';
-            try { enhanceTablesIn(resultDiv); } catch (e) { console.warn('enhanceTablesIn error', e); }
-            return;
-        }
-        if (Array.isArray(data.results) && data.results.length > 0) {
-            displayData(data.results);
-            return;
-        }
-        if (Array.isArray(data.data) && data.data.length > 0) {
-            displayData(data.data);
-            return;
-        }
-        if (data.response) {
-            displayTextResult(data.response);
-            return;
-        }
-        displayTextResult(data);
-    }
-
-    function displayData(data) {
-        const resultDiv = document.getElementById('result');
-        resultDiv.innerHTML = '';
-        if (!data) return;
-        if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
-            // Determine requested format from preview or command
-            let requestedFormat = '';
-            const preview = window.latestPreview || {};
-            const command = document.getElementById('commandInput').value.toLowerCase();
-
-            // Check for explicit format requests in the command
-            if (command.includes('chart') || command.includes('graph') || command.includes('plot')) {
-                requestedFormat = 'chart';
-            } else if (command.includes('table') || command.includes('list')) {
-                requestedFormat = 'table';
-            } else if (command.includes('analysis') || command.includes('summary') || command.includes('analyze')) {
-                requestedFormat = 'analysis';
-            }
-
-            // Also check preview metadata for format hints
-            if (preview.format) requestedFormat = preview.format;
-            if (preview.display_type) requestedFormat = preview.display_type;
-            if (preview.visualization) requestedFormat = 'chart';
-
-            // Always show row count
-            const info = document.createElement('div');
-            info.className = 'mb-2';
-            info.innerHTML = `<div class='alert alert-info'>${data.length} rows available.</div>`;
-            resultDiv.appendChild(info);
-
-            // Render in requested format or default to table
-            if (requestedFormat === 'chart' && hasChartableData(data)) {
-                displayChart(data);
-            } else {
-                displayTable(data);
-            }
-            return;
-        }
-
-        // For other types, show as text
-        displayTextResult(data);
-    }
-
-    function displayChart(data) {
-        const resultDiv = document.getElementById('result');
-        const canvas = document.createElement('canvas');
-        canvas.id = 'resultChart';
-        canvas.style.maxHeight = '400px';
-        resultDiv.appendChild(canvas);
-
-        const keys = Object.keys(data[0]);
-        const labelKey = keys[0];
-        const valueKey = keys.find(k => typeof data[0][k] === 'number') || keys[1];
-
-        new Chart(canvas.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: data.map(row => row[labelKey]),
-                datasets: [{
-                    label: valueKey,
-                    data: data.map(row => row[valueKey]),
-                    backgroundColor: '#3498db'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false
-            }
-        });
-    }
-
-    function displayTable(data) {
-        // Accept optional container for rendering
-        let container = arguments.length > 1 ? arguments[1] : document.getElementById('result');
-        const table = document.createElement('table');
-        table.className = 'table table-sm table-striped generated-datatable';
-
-        // Create header
-        const thead = document.createElement('thead');
-        const headerRow = document.createElement('tr');
-        const headerKeys = Object.keys(data[0]);
-        headerKeys.forEach(key => {
-            const th = document.createElement('th');
-            th.textContent = key;
-            headerRow.appendChild(th);
-        });
-        thead.appendChild(headerRow);
-        table.appendChild(thead);
-
-        // Create body
-        const tbody = document.createElement('tbody');
-        data.forEach(row => {
-            const tr = document.createElement('tr');
-            headerKeys.forEach(key => {
-                const td = document.createElement('td');
-                td.textContent = row[key] === null || row[key] === undefined ? '' : row[key];
-                tr.appendChild(td);
-            });
-            tbody.appendChild(tr);
-        });
-        table.appendChild(tbody);
-
-        container.appendChild(table);
-        try { enhanceTablesIn(container); } catch (e) { console.warn('enhanceTablesIn error', e); }
-    }
-
-    // Initialize DataTables on any tables inside the given container.
-    function enhanceTablesIn(container) {
-        try {
-            if (window.jQuery && $.fn && $.fn.dataTable) {
-                $(container).find('table').each(function () {
-                    try {
-                        if ($.fn.dataTable.isDataTable(this)) {
-                            $(this).DataTable().draw(false);
-                        } else {
-                            $(this).DataTable({
-                                pageLength: 10,
-                                lengthChange: true,
-                                searching: true,
-                                ordering: true,
-                                paging: true,
-                                dom: 'Bfrtip',
-                                buttons: [
-                                    { extend: 'excelHtml5', text: 'Export to Excel' }
-                                ],
-                                keys: true
-                            });
-                        }
                     } catch (e) {
-                        console.warn('DataTable init failed for one table', e);
+                        console.warn('chart render failed', e);
                     }
-                });
-            }
-        } catch (e) {
-            console.warn('enhanceTablesIn failed', e);
-        }
-    }
-
-    function sanitizeAndFormat(content) {
-        // Allow a small whitelist of tags and attributes and remove anything else.
-        const allowedTags = new Set(['b', 'i', 'strong', 'em', 'p', 'ul', 'ol', 'li', 'br', 'a', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5']);
-
-        function sanitizeHtml(input) {
-            // Parse the HTML and rebuild only allowed nodes/attributes
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(input, 'text/html');
-
-            function walk(node) {
-                if (node.nodeType === Node.TEXT_NODE) {
-                    return document.createTextNode(node.textContent);
-                }
-                if (node.nodeType !== Node.ELEMENT_NODE) {
-                    return document.createDocumentFragment();
-                }
-                const tag = node.tagName.toLowerCase();
-                if (!allowedTags.has(tag)) {
-                    // Replace disallowed element with its children (no tag)
-                    const frag = document.createDocumentFragment();
-                    node.childNodes.forEach(child => frag.appendChild(walk(child)));
-                    return frag;
-                }
-
-                const el = document.createElement(tag);
-                // Allowed attributes: only href/title/target for <a>
-                if (tag === 'a') {
-                    const href = node.getAttribute('href');
-                    if (href && /^(https?:\/\/|mailto:|\/)/i.test(href)) {
-                        el.setAttribute('href', href);
-                        el.setAttribute('target', '_blank');
-                        el.setAttribute('rel', 'noopener noreferrer');
+                } else if (requestedFormat === 'analysis') {
+                    const analysisContainer = document.createElement('div');
+                    resultDiv.appendChild(analysisContainer);
+                    let summary = `<b>Analysis & Comparisons:</b><br>`;
+                    summary += `Rows: ${tabularData.length}<br>`;
+                    const keys = Object.keys(tabularData[0]);
+                    const valueKey = keys.find(k => typeof tabularData[0][k] === 'number') || keys[1];
+                    if (valueKey) {
+                        const values = tabularData.map(row => Number(row[valueKey])).filter(v => !isNaN(v));
+                        if (values.length > 0) {
+                            const min = Math.min(...values);
+                            const max = Math.max(...values);
+                            const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
+                            summary += `Min ${valueKey}: ${min}<br>Max ${valueKey}: ${max}<br>Avg ${valueKey}: ${avg}<br>`;
+                        }
                     }
-                }
-
-                // Recurse children
-                node.childNodes.forEach(child => el.appendChild(walk(child)));
-                return el;
-            }
-
-            const container = document.createElement('div');
-            doc.body.childNodes.forEach(child => container.appendChild(walk(child)));
-            return container.innerHTML;
-        }
-
-        // If the input contains HTML tags, sanitize and return
-        if (/<[^>]+>/.test(content)) {
-            return sanitizeHtml(content);
-        }
-
-        // Otherwise treat as plain text: escape and format simple things (URLs, markdown links, lists, paragraphs)
-        function escapeHtml(s) {
-            return s.replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-
-        let out = escapeHtml(content || '');
-
-        // Markdown links [text](url)
-        out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
-            const safeUrl = escapeHtml(url);
-            const safeText = escapeHtml(text);
-            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
-        });
-
-        // URLs -> links
-        out = out.replace(/(https?:\/\/[^\s]+)/g, url => {
-            const s = escapeHtml(url);
-            return `<a href="${s}" target="_blank" rel="noopener noreferrer">${s}</a>`;
-        });
-
-        // Handle bullet lists (lines starting with -, *, •)
-        const lines = out.split(/\r?\n/);
-        let result = '';
-        let inList = false;
-        lines.forEach((line, idx) => {
-            const trimmed = line.trim();
-            if (/^([-*•])\s+/.test(trimmed)) {
-                if (!inList) { result += '<ul class="formatted-list">'; inList = true; }
-                result += `<li>${trimmed.replace(/^([-*•])\s+/, '')}</li>`;
-            } else {
-                if (inList) { result += '</ul>'; inList = false; }
-                if (trimmed === '') {
-                    // preserve paragraph separation
-                    result += '<p></p>';
+                    analysisContainer.innerHTML = summary;
+                    return;
+                } else if (requestedFormat === 'csv') {
+                    // Build CSV and provide download link
+                    const cols = Object.keys(tabularData[0]);
+                    const rows = [cols.join(',')].concat(tabularData.map(r => cols.map(c => '"' + String(r[c] === undefined ? '' : r[c]).replace(/"/g, '""') + '"').join(',')));
+                    const csv = rows.join('\n');
+                    const dl = document.createElement('a');
+                    dl.className = 'btn btn-sm btn-primary';
+                    dl.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                    dl.download = 'results.csv';
+                    dl.textContent = 'Download CSV';
+                    resultDiv.appendChild(dl);
+                    return;
                 } else {
-                    result += `<p>${trimmed}</p>`;
+                    // Default: render table
+                    displayTable(tabularData, resultDiv);
+                    return;
                 }
             }
-        });
-        if (inList) result += '</ul>';
 
-        // Collapse multiple empty paragraphs
-        result = result.replace(/(<p><\/p>\s*)+/g, '<p></p>');
-        return result || '<div></div>';
-    }
-
-    // Export result data in various formats
-    async function exportResult(format) {
-        const resultDiv = document.getElementById('confirmResult');
-        let data = window.latestPreview || {};
-
-        // If there's SQL in the editor, include it
-        const sqlEditor = document.getElementById('sqlEditor');
-        if (sqlEditor && sqlEditor.value.trim()) {
-            data.sql = sqlEditor.value.trim();
-        }
-
-        try {
-            const response = await fetch(`/api/export/${format}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ data: data })
-            });
-
-            if (response.ok) {
-                // Trigger download for successful response
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `results.${format}`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                a.remove();
-            } else {
-                const error = await response.json();
-                alert(`Export failed: ${error.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            console.error('Export error:', error);
-            alert('Export failed: ' + error.message);
-        }
-    }
-
-    function displayTextResult(data) {
-        const resultDiv = document.getElementById('result');
-        // Store latest data for export functionality
-        window.latestPreview = data;
-
-        if (Array.isArray(data)) {
-            const formattedContent = data.map(row => {
-                const entries = Object.entries(row)
-                    .filter(([k]) => !k.startsWith('_'))
-                    .map(([key, value]) => {
-                        const formattedValue = value && typeof value === 'string'
-                            ? sanitizeAndFormat(value)
-                            : String(value);
-                        return `<strong>${key}:</strong> ${formattedValue}`;
-                    });
-                return `<div class="result-item">${entries.join('<br>')}</div>`;
-            }).join('<hr>');
-            resultDiv.innerHTML = formattedContent;
-        } else if (data && typeof data === 'object') {
-            // Filter out internal keys and format values
-            const filtered = {};
-            Object.entries(data).forEach(([k, v]) => {
-                if (k.startsWith('_')) return;
-                if (v === null || v === undefined) return;
-                filtered[k] = typeof v === 'string' ? sanitizeAndFormat(v) : String(v);
-            });
-            const formattedContent = Object.entries(filtered)
-                .map(([key, value]) => `<div class="result-item"><strong>${key}:</strong> ${value}</div>`)
-                .join('');
-            resultDiv.innerHTML = formattedContent;
-        } else {
-            // Handle primitive values
-            resultDiv.innerHTML = `<div class="result-item">${sanitizeAndFormat(String(data))}</div>`;
-        }
-    }
-
-    function displaySuccess(message) {
-        const div = document.createElement('div');
-        div.className = 'success-message';
-        div.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
-        document.getElementById('result').appendChild(div);
-    }
-
-    function displayError(message) {
-        const div = document.createElement('div');
-        div.className = 'error-message';
-        div.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
-        // Prefer confirmResult, fallback to result
-        const confirmResult = document.getElementById('confirmResult');
-        if (confirmResult) {
-            confirmResult.appendChild(div);
-        } else {
-            const resultDiv = document.getElementById('result');
-            if (resultDiv) resultDiv.appendChild(div);
-        }
-    }
-
-    function setCommand(command) {
-        document.getElementById('commandInput').value = command;
-    }
-
-    function escapeHtml(unsafe) {
-        if (!unsafe) return '';
-        return String(unsafe)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
-    function applySqlFix(fixedSql) {
-        // Update SQL editor with fixed SQL
-        const sqlEditor = document.getElementById('sqlEditor');
-        if (sqlEditor) {
-            sqlEditor.value = fixedSql;
-            // Retry execution with fixed SQL
-            document.getElementById('confirmBtn').click();
-        }
-    }
-
-    function hasChartableData(data) {
-        if (!Array.isArray(data) || data.length === 0) return false;
-        // Check if there's at least one numeric column
-        const firstRow = data[0];
-        return Object.values(firstRow).some(val => typeof val === 'number' || !isNaN(parseFloat(val)));
-    }
-
-    function isLikelySQL(s) {
-        if (!s || typeof s !== 'string') return false;
-        const trimmed = s.trim().toLowerCase();
-        // Accept common SQL starts or fenced SQL
-        if (trimmed.startsWith('select') || trimmed.startsWith('with') || trimmed.startsWith('insert') || trimmed.startsWith('update') || trimmed.startsWith('delete')) return true;
-        if (trimmed.startsWith('```sql') || trimmed.startsWith('```')) return true;
-        // also allow queries that contain typical SQL keywords
-        if (/\bfrom\b/.test(trimmed) && /\bselect\b/.test(trimmed)) return true;
-        return false;
-    }
-
-    function formatTimestamp(ts) {
-        if (!ts) return '';
-        try {
-            // If ISO-like string with 'T', replace with space and strip microseconds
-            if (typeof ts === 'string' && ts.includes('T')) {
-                let s = ts.replace('T', ' ');
-                // remove fractional seconds like .123456
-                s = s.replace(/\.\d+/, '');
-                return s.split('Z')[0].trim();
-            }
-            // If timestamp is numeric (epoch), format using Date
-            if (!isNaN(Number(ts))) {
-                const d = new Date(Number(ts));
-                const yyyy = d.getFullYear();
-                const mm = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
-                const hh = String(d.getHours()).padStart(2, '0');
-                const mi = String(d.getMinutes()).padStart(2, '0');
-                const ss = String(d.getSeconds()).padStart(2, '0');
-                return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
-            }
-            // fallback: return as-is
-            return String(ts);
-        } catch (e) { return String(ts); }
-    }
-
-    async function loadHistory() {
-        const list = document.getElementById('historyList');
-        list.innerHTML = 'Loading...';
-        try {
-            const resp = await fetch('/api/query/history');
-            const data = await resp.json();
-            if (!Array.isArray(data) || data.length === 0) {
-                list.innerHTML = '<div class="text-muted">No history</div>';
+            // Fallback: show table or text as before
+            if (data.formatted && (data.formatted.content_type === 'text/html' || data.formatted.format === 'tabular')) {
+                resultDiv.innerHTML = data.formatted.content || '';
+                try { enhanceTablesIn(resultDiv); } catch (e) { console.warn('enhanceTablesIn error', e); }
                 return;
             }
-            list.innerHTML = '';
-            data.forEach(item => {
-                const el = document.createElement('div');
-                el.className = 'history-item';
-                const title = escapeHtml(item.command || item.question || item.question || '');
-                const timeRaw = item.timestamp || item.date || '';
-                const timeFmt = formatTimestamp(timeRaw);
-                el.innerHTML = `<div class="item-title">${title}</div><div class="small text-muted">${escapeHtml(timeFmt)}</div>`;
+            if (Array.isArray(data.results) && data.results.length > 0) {
+                displayData(data.results);
+                return;
+            }
+            if (Array.isArray(data.data) && data.data.length > 0) {
+                displayData(data.data);
+                return;
+            }
+            if (data.response) {
+                displayTextResult(data.response);
+                return;
+            }
+            displayTextResult(data);
+        }
 
-                // Delete button (hidden until hover) with confirmation
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
-                deleteBtn.textContent = 'Delete';
-                deleteBtn.addEventListener('click', async (ev) => {
-                    ev.stopPropagation();
-                    try {
-                        const ok = window.confirm('Delete this history item? This cannot be undone.');
-                        if (!ok) return;
-                        const resp = await fetch('/api/history/' + (item.id || item._history_id || item.history_id), { method: 'DELETE' });
-                        if (!resp.ok) {
-                            console.error('Failed to delete history item', resp.statusText);
-                            displayError('Failed to delete history item');
-                            return;
-                        }
-                        loadHistory();
-                    } catch (e) { console.error(e); displayError('Failed to delete history item'); }
-                });
+        function displayData(data) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '';
+            if (!data) return;
+            if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
+                // Determine requested format from preview or command
+                let requestedFormat = '';
+                const preview = window.latestPreview || {};
+                const command = document.getElementById('commandInput').value.toLowerCase();
 
-                el.appendChild(deleteBtn);
+                // Check for explicit format requests in the command
+                if (command.includes('chart') || command.includes('graph') || command.includes('plot')) {
+                    requestedFormat = 'chart';
+                } else if (command.includes('table') || command.includes('list')) {
+                    requestedFormat = 'table';
+                } else if (command.includes('analysis') || command.includes('summary') || command.includes('analyze')) {
+                    requestedFormat = 'analysis';
+                }
 
-                // Click on the history item loads the preview and reveals panels
-                el.addEventListener('click', async () => {
-                    try {
-                        // Collapse sidebar on mobile
-                        if (window.innerWidth <= 768) {
-                            const historyPanel = document.getElementById('historyPanel');
-                            const expandBtn = document.getElementById('expandHistoryBtn');
-                            if (historyPanel) historyPanel.classList.remove('expanded');
-                            if (expandBtn) expandBtn.style.display = 'block';
-                        }
-                        // Load main prompt into command input
-                        const mainText = item.command || item.question || '';
-                        document.getElementById('commandInput').value = mainText;
+                // Also check preview metadata for format hints
+                if (preview.format) requestedFormat = preview.format;
+                if (preview.display_type) requestedFormat = preview.display_type;
+                if (preview.visualization) requestedFormat = 'chart';
 
-                        // Restore chat panel and chatHistory from item.conversation if available
-                        const chatPanel = document.getElementById('chatPanel');
-                        if (chatPanel) chatPanel.innerHTML = '';
-                        let conversation = item.conversation || item.chat_history || [];
-                        if (!Array.isArray(conversation)) conversation = [];
-                        window.chatHistory = conversation.map(msg => ({ role: msg.role, text: msg.text }));
-                        // If conversation is empty, show a placeholder
-                        if (conversation.length === 0 && chatPanel) {
-                            chatPanel.innerHTML = '<div class="text-muted">Your conversation will appear here.</div>';
-                        } else if (chatPanel) {
-                            conversation.forEach(msg => {
-                                const row = document.createElement('div');
-                                row.className = 'chat-row ' + (msg.role === 'user' ? 'user' : 'assistant');
-                                const bubble = document.createElement('div');
-                                bubble.className = 'chat-bubble ' + (msg.role === 'user' ? 'chat-user' : 'chat-assistant');
-                                bubble.innerHTML = msg.text;
-                                row.appendChild(bubble);
-                                chatPanel.appendChild(row);
-                            });
-                            chatPanel.scrollTop = chatPanel.scrollHeight;
-                        }
+                // Always show row count
+                const info = document.createElement('div');
+                info.className = 'mb-2';
+                info.innerHTML = `<div class='alert alert-info'>${data.length} rows available.</div>`;
+                resultDiv.appendChild(info);
 
-                        // Save preview and reveal panels so user can inspect/edit
-                        window.latestPreview = item;
-                        window.goClicked = true;
-                        document.getElementById('sqlPanel').style.display = 'block';
-                        document.getElementById('sqlEditor').style.display = 'none';
-                        document.getElementById('toggleSql').textContent = 'Show SQL';
+                // Render in requested format or default to table
+                if (requestedFormat === 'chart' && hasChartableData(data)) {
+                    displayChart(data);
+                } else {
+                    displayTable(data);
+                }
+                return;
+            }
 
-                        // Fill SQL into editor (hidden) and display explanation only if it looks like SQL
-                        try {
-                            const sqlVal = item.sql || '';
-                            if (sqlVal && isLikelySQL(sqlVal)) {
-                                document.getElementById('sqlEditor').value = sqlVal;
-                            } else {
-                                document.getElementById('sqlEditor').value = '';
-                            }
-                        } catch (e) { }
+            // For other types, show as text
+            displayTextResult(data);
+        }
 
-                        // Enable confirm if the preview has a server-generated id
-                        const hasHistoryId = (item.id || item._history_id || item.history_id);
-                        document.getElementById('confirmBtn').disabled = !hasHistoryId;
+        function displayChart(data) {
+            const resultDiv = document.getElementById('result');
+            const canvas = document.createElement('canvas');
+            canvas.id = 'resultChart';
+            canvas.style.maxHeight = '400px';
+            resultDiv.appendChild(canvas);
 
-                        displayResult(item);
-                    } catch (e) { console.error(e); }
-                });
+            const keys = Object.keys(data[0]);
+            const labelKey = keys[0];
+            const valueKey = keys.find(k => typeof data[0][k] === 'number') || keys[1];
 
-                list.appendChild(el);
+            new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: data.map(row => row[labelKey]),
+                    datasets: [{
+                        label: valueKey,
+                        data: data.map(row => row[valueKey]),
+                        backgroundColor: '#3498db'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
             });
-        } catch (e) {
-            console.error(e);
-            list.innerHTML = '<div class="text-danger">Failed to load history</div>';
         }
-    }
 
-    // New Chat button handler
-    document.getElementById('newChatBtn').addEventListener('click', () => {
-        // Collapse sidebar on mobile
-        if (window.innerWidth <= 768) {
-            const historyPanel = document.getElementById('historyPanel');
-            const expandBtn = document.getElementById('expandHistoryBtn');
-            if (historyPanel) historyPanel.classList.remove('expanded');
-            if (expandBtn) expandBtn.style.display = 'block';
+        function displayTable(data) {
+            // Accept optional container for rendering
+            let container = arguments.length > 1 ? arguments[1] : document.getElementById('result');
+            const table = document.createElement('table');
+            table.className = 'table table-sm table-striped generated-datatable';
+
+            // Create header
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            const headerKeys = Object.keys(data[0]);
+            headerKeys.forEach(key => {
+                const th = document.createElement('th');
+                th.textContent = key;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Create body
+            const tbody = document.createElement('tbody');
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                headerKeys.forEach(key => {
+                    const td = document.createElement('td');
+                    td.textContent = row[key] === null || row[key] === undefined ? '' : row[key];
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            container.appendChild(table);
+            try { enhanceTablesIn(container); } catch (e) { console.warn('enhanceTablesIn error', e); }
         }
-        // Clear chat panel
-        const chatPanel = document.getElementById('chatPanel');
-        if (chatPanel) chatPanel.innerHTML = '<div class="text-muted">Your conversation will appear here.</div>';
-        // Clear command input
-        document.getElementById('commandInput').value = '';
-        // Clear SQL editor
-        document.getElementById('sqlEditor').value = '';
-        // Clear chat history
-        window.chatHistory = [];
-        // Hide result area
-        document.getElementById('result').innerHTML = '';
-        document.getElementById('confirmResult').innerHTML = '';
-        // Optionally reset preview state
-        window.latestPreview = null;
-        window.goClicked = false;
-    });
-    // Load history on page load
-    loadHistory();
-    // Load DB tables for the DB search panel
-    loadDbTables();
 
-    // Clear all chat history button handler (with user feedback)
-    // Uses server-side clear if available, falls back to client-only clear
-    const clearBtn = document.getElementById('clearAllHistoryBtn');
-    if (clearBtn) {
-        clearBtn.addEventListener('click', async () => {
-            const ok = confirm('Clear all chat history? This cannot be undone.');
-            if (!ok) return;
-            let serverCleared = false;
+        // Initialize DataTables on any tables inside the given container.
+        function enhanceTablesIn(container) {
             try {
-                // Attempt server-side clear via /api/history (DELETE)
-                const resp = await fetch('/api/history', { method: 'DELETE' });
-                if (resp.ok || resp.status === 204) serverCleared = true;
-                else {
-                    // Try alternate endpoint used by history listing
-                    const alt = await fetch('/api/query/history', { method: 'DELETE' });
-                    if (alt.ok || alt.status === 204) serverCleared = true;
+                if (window.jQuery && $.fn && $.fn.dataTable) {
+                    $(container).find('table').each(function () {
+                        try {
+                            if ($.fn.dataTable.isDataTable(this)) {
+                                $(this).DataTable().draw(false);
+                            } else {
+                                $(this).DataTable({
+                                    pageLength: 10,
+                                    lengthChange: true,
+                                    searching: true,
+                                    ordering: true,
+                                    paging: true,
+                                    dom: 'Bfrtip',
+                                    buttons: [
+                                        { extend: 'excelHtml5', text: 'Export to Excel' }
+                                    ],
+                                    keys: true
+                                });
+                            }
+                        } catch (e) {
+                            console.warn('DataTable init failed for one table', e);
+                        }
+                    });
                 }
             } catch (e) {
-                console.warn('Server-side clear failed or not available', e);
+                console.warn('enhanceTablesIn failed', e);
+            }
+        }
+
+        function sanitizeAndFormat(content) {
+            // Allow a small whitelist of tags and attributes and remove anything else.
+            const allowedTags = new Set(['b', 'i', 'strong', 'em', 'p', 'ul', 'ol', 'li', 'br', 'a', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5']);
+
+            function sanitizeHtml(input) {
+                // Parse the HTML and rebuild only allowed nodes/attributes
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(input, 'text/html');
+
+                function walk(node) {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        return document.createTextNode(node.textContent);
+                    }
+                    if (node.nodeType !== Node.ELEMENT_NODE) {
+                        return document.createDocumentFragment();
+                    }
+                    const tag = node.tagName.toLowerCase();
+                    if (!allowedTags.has(tag)) {
+                        // Replace disallowed element with its children (no tag)
+                        const frag = document.createDocumentFragment();
+                        node.childNodes.forEach(child => frag.appendChild(walk(child)));
+                        return frag;
+                    }
+
+                    const el = document.createElement(tag);
+                    // Allowed attributes: only href/title/target for <a>
+                    if (tag === 'a') {
+                        const href = node.getAttribute('href');
+                        if (href && /^(https?:\/\/|mailto:|\/)/i.test(href)) {
+                            el.setAttribute('href', href);
+                            el.setAttribute('target', '_blank');
+                            el.setAttribute('rel', 'noopener noreferrer');
+                        }
+                    }
+
+                    // Recurse children
+                    node.childNodes.forEach(child => el.appendChild(walk(child)));
+                    return el;
+                }
+
+                const container = document.createElement('div');
+                doc.body.childNodes.forEach(child => container.appendChild(walk(child)));
+                return container.innerHTML;
             }
 
-            // Clear client-side chat history and refresh UI
-            try {
-                window.chatHistory = [];
-                const list = document.getElementById('historyList');
-                if (list) list.innerHTML = '<div class="text-muted">No history</div>';
-                loadHistory();
-                if (serverCleared) {
-                    displaySuccess('Chat history cleared on server and locally.');
+            // If the input contains HTML tags, sanitize and return
+            if (/<[^>]+>/.test(content)) {
+                return sanitizeHtml(content);
+            }
+
+            // Otherwise treat as plain text: escape and format simple things (URLs, markdown links, lists, paragraphs)
+            function escapeHtml(s) {
+                return s.replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            let out = escapeHtml(content || '');
+
+            // Markdown links [text](url)
+            out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+                const safeUrl = escapeHtml(url);
+                const safeText = escapeHtml(text);
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+            });
+
+            // URLs -> links
+            out = out.replace(/(https?:\/\/[^\s]+)/g, url => {
+                const s = escapeHtml(url);
+                return `<a href="${s}" target="_blank" rel="noopener noreferrer">${s}</a>`;
+            });
+
+            // Handle bullet lists (lines starting with -, *, •)
+            const lines = out.split(/\r?\n/);
+            let result = '';
+            let inList = false;
+            lines.forEach((line, idx) => {
+                const trimmed = line.trim();
+                if (/^([-*•])\s+/.test(trimmed)) {
+                    if (!inList) { result += '<ul class="formatted-list">'; inList = true; }
+                    result += `<li>${trimmed.replace(/^([-*•])\s+/, '')}</li>`;
                 } else {
-                    displaySuccess('Chat history cleared locally. Server-side clear not available or failed.');
+                    if (inList) { result += '</ul>'; inList = false; }
+                    if (trimmed === '') {
+                        // preserve paragraph separation
+                        result += '<p></p>';
+                    } else {
+                        result += `<p>${trimmed}</p>`;
+                    }
+                }
+            });
+            if (inList) result += '</ul>';
+
+            // Collapse multiple empty paragraphs
+            result = result.replace(/(<p><\/p>\s*)+/g, '<p></p>');
+            return result || '<div></div>';
+        }
+
+        // Export result data in various formats
+        async function exportResult(format) {
+            const resultDiv = document.getElementById('confirmResult');
+            let data = window.latestPreview || {};
+
+            // If there's SQL in the editor, include it
+            const sqlEditor = document.getElementById('sqlEditor');
+            if (sqlEditor && sqlEditor.value.trim()) {
+                data.sql = sqlEditor.value.trim();
+            }
+
+            try {
+                const resp = await fetch(`/api/export/${format}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: data })
+                });
+                if (resp.ok) {
+                    // Trigger download for successful response
+                    const blob = await resp.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `results.${format}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                } else {
+                    let error;
+                    try { error = await resp.json(); } catch (e) { error = { error: await resp.text().catch(() => resp.statusText) }; }
+                    Swal.fire({ icon: 'error', title: 'Export failed', text: error.error || 'Unknown error' });
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                Swal.fire({ icon: 'error', title: 'Export failed', text: error.message || String(error) });
+            }
+        }
+
+        function displayTextResult(data) {
+            const resultDiv = document.getElementById('result');
+            // Store latest data for export functionality
+            window.latestPreview = data;
+
+            if (Array.isArray(data)) {
+                const formattedContent = data.map(row => {
+                    const entries = Object.entries(row)
+                        .filter(([k]) => !k.startsWith('_'))
+                        .map(([key, value]) => {
+                            const formattedValue = value && typeof value === 'string'
+                                ? sanitizeAndFormat(value)
+                                : String(value);
+                            return `<strong>${key}:</strong> ${formattedValue}`;
+                        });
+                    return `<div class="result-item">${entries.join('<br>')}</div>`;
+                }).join('<hr>');
+                resultDiv.innerHTML = formattedContent;
+            } else if (data && typeof data === 'object') {
+                // Filter out internal keys and format values
+                const filtered = {};
+                Object.entries(data).forEach(([k, v]) => {
+                    if (k.startsWith('_')) return;
+                    if (v === null || v === undefined) return;
+                    filtered[k] = typeof v === 'string' ? sanitizeAndFormat(v) : String(v);
+                });
+                const formattedContent = Object.entries(filtered)
+                    .map(([key, value]) => `<div class="result-item"><strong>${key}:</strong> ${value}</div>`)
+                    .join('');
+                resultDiv.innerHTML = formattedContent;
+            } else {
+                // Handle primitive values
+                resultDiv.innerHTML = `<div class="result-item">${sanitizeAndFormat(String(data))}</div>`;
+            }
+        }
+
+        function displaySuccess(message) {
+            const div = document.createElement('div');
+            div.className = 'success-message';
+            div.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+            document.getElementById('result').appendChild(div);
+        }
+
+        function displayError(message) {
+            const div = document.createElement('div');
+            div.className = 'error-message';
+            // Support passing an error object (from staging) or a simple string
+            let innerHtml = '';
+            if (message && typeof message === 'object') {
+                const err = message;
+                const title = escapeHtml(err.error || err.message || 'Error');
+                innerHtml = `<i class="fas fa-exclamation-circle"></i> <strong>${title}</strong>`;
+                if (err.stage) {
+                    innerHtml += `<div style="margin-top:6px;"><small>Stage: ${escapeHtml(err.stage)}</small></div>`;
+                }
+                if (err.details) {
+                    innerHtml += `<div style="margin-top:6px;"><pre style="white-space:pre-wrap;">${escapeHtml(err.details)}</pre></div>`;
+                }
+                if (err.traceback) {
+                    innerHtml += `<details style="margin-top:6px;"><summary>Traceback (expand)</summary><pre style="white-space:pre-wrap;">${escapeHtml(err.traceback)}</pre></details>`;
+                }
+            } else {
+                innerHtml = `<i class="fas fa-exclamation-circle"></i> ${escapeHtml(String(message || 'Error'))}`;
+            }
+            div.innerHTML = innerHtml;
+            // Prefer confirmResult, fallback to result
+            const confirmResult = document.getElementById('confirmResult');
+            if (confirmResult) {
+                confirmResult.appendChild(div);
+            } else {
+                const resultDiv = document.getElementById('result');
+                if (resultDiv) resultDiv.appendChild(div);
+            }
+        }
+
+        function setCommand(command) {
+            document.getElementById('commandInput').value = command;
+        }
+
+        function escapeHtml(unsafe) {
+            if (!unsafe) return '';
+            return String(unsafe)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function applySqlFix(fixedSql) {
+            // Update SQL editor with fixed SQL
+            const sqlEditor = document.getElementById('sqlEditor');
+            if (sqlEditor) {
+                sqlEditor.value = fixedSql;
+                // Retry execution with fixed SQL
+                document.getElementById('confirmBtn').click();
+            }
+        }
+
+        function hasChartableData(data) {
+            if (!Array.isArray(data) || data.length === 0) return false;
+            // Check if there's at least one numeric column
+            const firstRow = data[0];
+            return Object.values(firstRow).some(val => typeof val === 'number' || !isNaN(parseFloat(val)));
+        }
+
+        function isLikelySQL(s) {
+            if (!s || typeof s !== 'string') return false;
+            const trimmed = s.trim().toLowerCase();
+            // Accept common SQL starts or fenced SQL
+            if (trimmed.startsWith('select') || trimmed.startsWith('with') || trimmed.startsWith('insert') || trimmed.startsWith('update') || trimmed.startsWith('delete')) return true;
+            if (trimmed.startsWith('```sql') || trimmed.startsWith('```')) return true;
+            // also allow queries that contain typical SQL keywords
+            if (/\bfrom\b/.test(trimmed) && /\bselect\b/.test(trimmed)) return true;
+            return false;
+        }
+
+        function formatTimestamp(ts) {
+            if (!ts) return '';
+            try {
+                // If ISO-like string with 'T', replace with space and strip microseconds
+                if (typeof ts === 'string' && ts.includes('T')) {
+                    let s = ts.replace('T', ' ');
+                    // remove fractional seconds like .123456
+                    s = s.replace(/\.\d+/, '');
+                    return s.split('Z')[0].trim();
+                }
+                // If timestamp is numeric (epoch), format using Date
+                if (!isNaN(Number(ts))) {
+                    const d = new Date(Number(ts));
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, '0');
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    const hh = String(d.getHours()).padStart(2, '0');
+                    const mi = String(d.getMinutes()).padStart(2, '0');
+                    const ss = String(d.getSeconds()).padStart(2, '0');
+                    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+                }
+                // fallback: return as-is
+                return String(ts);
+            } catch (e) { return String(ts); }
+        }
+
+        async function loadHistory() {
+            const list = document.getElementById('historyList');
+            list.innerHTML = 'Loading...';
+            try {
+                const data = await fetchJson('/api/query/history');
+                if (!Array.isArray(data) || data.length === 0) {
+                    list.innerHTML = '<div class="text-muted">No history</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                data.forEach(item => {
+                    const el = document.createElement('div');
+                    el.className = 'history-item';
+                    const title = escapeHtml(item.command || item.question || item.question || '');
+                    const timeRaw = item.timestamp || item.date || '';
+                    const timeFmt = formatTimestamp(timeRaw);
+                    el.innerHTML = `<div class="item-title">${title}</div><div class="small text-muted">${escapeHtml(timeFmt)}</div>`;
+
+                    // Delete button (hidden until hover) with confirmation
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
+                    deleteBtn.textContent = 'Delete';
+                    deleteBtn.addEventListener('click', async (ev) => {
+                        ev.stopPropagation();
+                        try {
+                            const ok = window.confirm('Delete this history item? This cannot be undone.');
+                            if (!ok) return;
+                            await fetchJson('/api/history/' + (item.id || item._history_id || item.history_id), { method: 'DELETE' });
+                            loadHistory();
+                        } catch (e) { console.error(e); displayError('Failed to delete history item'); }
+                    });
+
+                    el.appendChild(deleteBtn);
+
+                    // Click on the history item loads the preview and reveals panels
+                    el.addEventListener('click', async () => {
+                        try {
+                            // Collapse sidebar on mobile
+                            if (window.innerWidth <= 768) {
+                                const historyPanel = document.getElementById('historyPanel');
+                                const expandBtn = document.getElementById('expandHistoryBtn');
+                                if (historyPanel) historyPanel.classList.remove('expanded');
+                                if (expandBtn) expandBtn.style.display = 'block';
+                            }
+                            // Load main prompt into command input
+                            const mainText = item.command || item.question || '';
+                            document.getElementById('commandInput').value = mainText;
+
+                            // Restore chat panel and chatHistory from item.conversation if available
+                            const chatPanel = document.getElementById('chatPanel');
+                            if (chatPanel) chatPanel.innerHTML = '';
+                            let conversation = item.conversation || item.chat_history || [];
+                            if (!Array.isArray(conversation)) conversation = [];
+                            window.chatHistory = conversation.map(msg => ({ role: msg.role, text: msg.text }));
+                            // If conversation is empty, show a placeholder
+                            if (conversation.length === 0 && chatPanel) {
+                                chatPanel.innerHTML = '<div class="text-muted">Your conversation will appear here.</div>';
+                            } else if (chatPanel) {
+                                conversation.forEach(msg => {
+                                    const row = document.createElement('div');
+                                    row.className = 'chat-row ' + (msg.role === 'user' ? 'user' : 'assistant');
+                                    const bubble = document.createElement('div');
+                                    bubble.className = 'chat-bubble ' + (msg.role === 'user' ? 'chat-user' : 'chat-assistant');
+                                    bubble.innerHTML = msg.text;
+                                    row.appendChild(bubble);
+                                    chatPanel.appendChild(row);
+                                });
+                                chatPanel.scrollTop = chatPanel.scrollHeight;
+                            }
+
+                            // Save preview and reveal panels so user can inspect/edit
+                            window.latestPreview = item;
+                            window.goClicked = true;
+                            document.getElementById('sqlPanel').style.display = 'block';
+                            document.getElementById('sqlEditor').style.display = 'none';
+                            document.getElementById('toggleSql').textContent = 'Show SQL';
+
+                            // Fill SQL into editor (hidden) and display explanation only if it looks like SQL
+                            try {
+                                const sqlVal = item.sql || '';
+                                if (sqlVal && isLikelySQL(sqlVal)) {
+                                    document.getElementById('sqlEditor').value = sqlVal;
+                                } else {
+                                    document.getElementById('sqlEditor').value = '';
+                                }
+                            } catch (e) { }
+
+                            // Enable confirm if the preview has a server-generated id
+                            const hasHistoryId = (item.id || item._history_id || item.history_id);
+                            document.getElementById('confirmBtn').disabled = !hasHistoryId;
+
+                            displayResult(item);
+                        } catch (e) { console.error(e); }
+                    });
+
+                    list.appendChild(el);
+                });
+            } catch (e) {
+                console.error(e);
+                list.innerHTML = '<div class="text-danger">Failed to load history</div>';
+            }
+        }
+
+        // New Chat button handler
+        document.getElementById('newChatBtn').addEventListener('click', () => {
+            // Collapse sidebar on mobile
+            if (window.innerWidth <= 768) {
+                const historyPanel = document.getElementById('historyPanel');
+                const expandBtn = document.getElementById('expandHistoryBtn');
+                if (historyPanel) historyPanel.classList.remove('expanded');
+                if (expandBtn) expandBtn.style.display = 'block';
+            }
+            // Clear chat panel
+            const chatPanel = document.getElementById('chatPanel');
+            if (chatPanel) chatPanel.innerHTML = '<div class="text-muted">Your conversation will appear here.</div>';
+            // Clear command input
+            document.getElementById('commandInput').value = '';
+            // Clear SQL editor
+            document.getElementById('sqlEditor').value = '';
+            // Clear chat history
+            window.chatHistory = [];
+            // Hide result area
+            document.getElementById('result').innerHTML = '';
+            document.getElementById('confirmResult').innerHTML = '';
+            // Optionally reset preview state
+            window.latestPreview = null;
+            window.goClicked = false;
+        });
+        // Load history on page load
+        loadHistory();
+        // Load DB tables for the DB search panel
+        loadDbTables();
+
+        // Clear all chat history button handler (with user feedback)
+        // Uses server-side clear if available, falls back to client-only clear
+        const clearBtn = document.getElementById('clearAllHistoryBtn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', async () => {
+                const ok = confirm('Clear all chat history? This cannot be undone.');
+                if (!ok) return;
+                let serverCleared = false;
+                try {
+                    // Attempt server-side clear via /api/history (DELETE)
+                    await fetchJson('/api/history', { method: 'DELETE' });
+                    serverCleared = true;
+                } catch (e) {
+                    // Try alternate endpoint used by history listing
+                    try {
+                        await fetchJson('/api/query/history', { method: 'DELETE' });
+                        serverCleared = true;
+                    } catch (e2) {
+                        console.warn('Server-side clear failed or not available', e2);
+                    }
+                }
+
+                // Clear client-side chat history and refresh UI
+                try {
+                    window.chatHistory = [];
+                    const list = document.getElementById('historyList');
+                    if (list) list.innerHTML = '<div class="text-muted">No history</div>';
+                    loadHistory();
+                    if (serverCleared) {
+                        displaySuccess('Chat history cleared on server and locally.');
+                    } else {
+                        displaySuccess('Chat history cleared locally. Server-side clear not available or failed.');
+                    }
+                } catch (e) {
+                    console.error(e);
+                    displayError('Failed to clear history locally.');
+                }
+            });
+        }
+
+        document.getElementById('dbSelectAll').addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            document.querySelectorAll('#dbTablesList input[type=checkbox]').forEach(cb => cb.checked = checked);
+        });
+
+        document.getElementById('dbSearchBtn').addEventListener('click', async () => {
+            const q = document.getElementById('dbSearchInput').value.trim();
+            if (!q) { Swal.fire({ icon: 'warning', title: 'Enter search text', text: 'Please enter search text', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false }); return; }
+            const checked = Array.from(document.querySelectorAll('#dbTablesList input[type=checkbox]:checked')).map(i => i.value);
+            try {
+                try {
+                    const data = await fetchJson('/api/db/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, tables: checked }) });
+                    renderDbSearchResults(data);
+                } catch (e) {
+                    console.error(e);
+                    displayError('DB search failed');
                 }
             } catch (e) {
                 console.error(e);
-                displayError('Failed to clear history locally.');
+                displayError('DB search failed');
             }
         });
-    }
 
-    document.getElementById('dbSelectAll').addEventListener('change', (e) => {
-        const checked = e.target.checked;
-        document.querySelectorAll('#dbTablesList input[type=checkbox]').forEach(cb => cb.checked = checked);
-    });
+        document.getElementById('dbClearBtn').addEventListener('click', () => {
+            document.getElementById('dbSearchInput').value = '';
+            document.getElementById('dbSearchResults').innerHTML = '';
+        });
 
-    document.getElementById('dbSearchBtn').addEventListener('click', async () => {
-        const q = document.getElementById('dbSearchInput').value.trim();
-        if (!q) { alert('Please enter search text'); return; }
-        const checked = Array.from(document.querySelectorAll('#dbTablesList input[type=checkbox]:checked')).map(i => i.value);
-        try {
-            const resp = await fetch('/api/db/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, tables: checked }) });
-            const data = await resp.json();
-            renderDbSearchResults(data);
-        } catch (e) {
-            console.error(e);
-            displayError('DB search failed');
+        async function loadDbTables() {
+            try {
+                const data = await fetchJson('/api/db/tables');
+                const list = document.getElementById('dbTablesList');
+                list.innerHTML = '';
+                (data.tables || []).forEach(t => {
+                    // Accept both {table_name: ...} and string
+                    let tStr = (typeof t === 'string') ? t : (t && t.table_name ? t.table_name : (t && t.name ? t.name : String(t)));
+                    const id = 'tbl_' + tStr.replace(/[^a-zA-Z0-9_]/g, '_');
+                    const div = document.createElement('div');
+                    div.className = 'form-check';
+                    div.innerHTML = `<input class="form-check-input" type="checkbox" id="${id}" value="${tStr}"> <label class="form-check-label" for="${id}">${tStr}</label>`;
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error('Failed to load DB tables', e);
+                document.getElementById('dbTablesList').innerHTML = '<div class="text-danger small">Failed to load table list</div>';
+            }
         }
-    });
 
-    document.getElementById('dbClearBtn').addEventListener('click', () => {
-        document.getElementById('dbSearchInput').value = '';
-        document.getElementById('dbSearchResults').innerHTML = '';
-    });
-
-    async function loadDbTables() {
-        try {
-            const resp = await fetch('/api/db/tables');
-            if (!resp.ok) {
-                const txt = await resp.text().catch(() => resp.statusText || 'Failed');
-                document.getElementById('dbTablesList').innerHTML = `<div class="text-danger small">Failed to load table list: ${escapeHtml(txt)}</div><div class="mt-2"><button id="retryTables" class="btn btn-sm btn-outline-secondary">Retry</button></div>`;
-                const retryBtn = document.getElementById('retryTables');
-                if (retryBtn) retryBtn.addEventListener('click', loadDbTables);
+        function renderDbSearchResults(payload) {
+            const container = document.getElementById('dbSearchResults');
+            container.innerHTML = '';
+            if (!payload || payload.error) {
+                container.innerHTML = '<div class="text-danger">No results or an error occurred.</div>';
                 return;
             }
-            const data = await resp.json();
-            const list = document.getElementById('dbTablesList');
-            list.innerHTML = '';
-            (data.tables || []).forEach(t => {
-                // Accept both {table_name: ...} and string
-                let tStr = (typeof t === 'string') ? t : (t && t.table_name ? t.table_name : (t && t.name ? t.name : String(t)));
-                const id = 'tbl_' + tStr.replace(/[^a-zA-Z0-9_]/g, '_');
-                const div = document.createElement('div');
-                div.className = 'form-check';
-                div.innerHTML = `<input class="form-check-input" type="checkbox" id="${id}" value="${tStr}"> <label class="form-check-label" for="${id}">${tStr}</label>`;
-                list.appendChild(div);
-            });
-        } catch (e) {
-            console.error('Failed to load DB tables', e);
-            document.getElementById('dbTablesList').innerHTML = '<div class="text-danger small">Failed to load table list</div>';
-        }
-    }
+            const q = payload.query;
+            const results = payload.results || [];
+            const header = document.createElement('div');
+            header.className = 'mb-2';
+            header.innerHTML = `<strong>Search results for "${escapeHtml(q)}"</strong>`;
+            container.appendChild(header);
+            results.forEach(tbl => {
+                if (!tbl.matches || tbl.matches.length === 0) return; // skip tables with no matches
+                const box = document.createElement('div');
+                box.className = 'mb-3';
+                const title = document.createElement('div');
+                title.innerHTML = `<strong>Table: ${escapeHtml(tbl.table)}</strong>`;
+                box.appendChild(title);
 
-    function renderDbSearchResults(payload) {
-        const container = document.getElementById('dbSearchResults');
-        container.innerHTML = '';
-        if (!payload || payload.error) {
-            container.innerHTML = '<div class="text-danger">No results or an error occurred.</div>';
-            return;
-        }
-        const q = payload.query;
-        const results = payload.results || [];
-        const header = document.createElement('div');
-        header.className = 'mb-2';
-        header.innerHTML = `<strong>Search results for "${escapeHtml(q)}"</strong>`;
-        container.appendChild(header);
-        results.forEach(tbl => {
-            if (!tbl.matches || tbl.matches.length === 0) return; // skip tables with no matches
-            const box = document.createElement('div');
-            box.className = 'mb-3';
-            const title = document.createElement('div');
-            title.innerHTML = `<strong>Table: ${escapeHtml(tbl.table)}</strong>`;
-            box.appendChild(title);
+                tbl.matches.forEach(m => {
+                    const mdiv = document.createElement('div');
+                    mdiv.className = 'mt-2';
+                    mdiv.innerHTML = `<div><em>Column:</em> ${escapeHtml(m.column)} — <em>Matches:</em> ${m.count}</div>`;
 
-            tbl.matches.forEach(m => {
-                const mdiv = document.createElement('div');
-                mdiv.className = 'mt-2';
-                mdiv.innerHTML = `<div><em>Column:</em> ${escapeHtml(m.column)} — <em>Matches:</em> ${m.count}</div>`;
+                    const samplesWrap = document.createElement('div');
+                    samplesWrap.className = 'small text-muted';
+                    samplesWrap.textContent = 'Examples: ';
 
-                const samplesWrap = document.createElement('div');
-                samplesWrap.className = 'small text-muted';
-                samplesWrap.textContent = 'Examples: ';
+                    (m.samples || []).forEach((row, idx) => {
+                        const val = row[m.column] || Object.values(row)[0] || '';
+                        const text = ('' + val).substring(0, 120);
+                        const a = document.createElement('a');
+                        a.href = '#';
+                        a.className = 'me-2';
+                        a.textContent = text + (('' + val).length > 120 ? '…' : '');
+                        a.addEventListener('click', (ev) => { ev.preventDefault(); showRowModal(row, tbl.table); });
+                        samplesWrap.appendChild(a);
+                    });
 
-                (m.samples || []).forEach((row, idx) => {
-                    const val = row[m.column] || Object.values(row)[0] || '';
-                    const text = ('' + val).substring(0, 120);
-                    const a = document.createElement('a');
-                    a.href = '#';
-                    a.className = 'me-2';
-                    a.textContent = text + (('' + val).length > 120 ? '…' : '');
-                    a.addEventListener('click', (ev) => { ev.preventDefault(); showRowModal(row, tbl.table); });
-                    samplesWrap.appendChild(a);
+                    mdiv.appendChild(samplesWrap);
+                    box.appendChild(mdiv);
                 });
 
-                mdiv.appendChild(samplesWrap);
-                box.appendChild(mdiv);
+                container.appendChild(box);
             });
-
-            container.appendChild(box);
-        });
-    }
-
-    // Modal helper to show full row data
-    function showRowModal(rowObj, tableName) {
-        // Create modal content
-        const modalTitle = document.getElementById('dbRowModalTitle');
-        const modalBody = document.getElementById('dbRowModalBody');
-        modalTitle.textContent = `Table: ${tableName}`;
-        modalBody.innerHTML = '';
-
-        const tbl = document.createElement('table');
-        tbl.className = 'table table-sm table-striped';
-        const tb = document.createElement('tbody');
-        Object.keys(rowObj).forEach(k => {
-            const tr = document.createElement('tr');
-            const th = document.createElement('th');
-            th.style.width = '30%';
-            th.textContent = k;
-            const td = document.createElement('td');
-            td.textContent = rowObj[k] === null ? '' : String(rowObj[k]);
-            tr.appendChild(th);
-            tr.appendChild(td);
-            tb.appendChild(tr);
-        });
-        tbl.appendChild(tb);
-        modalBody.appendChild(tbl);
-
-        // Show bootstrap modal
-        try {
-            const modalEl = document.getElementById('dbRowModal');
-            const bsModal = new bootstrap.Modal(modalEl);
-            bsModal.show();
-        } catch (e) {
-            // Fallback: alert with JSON
-            alert(JSON.stringify(rowObj, null, 2));
-        }
-    }
-
-    // Clarifier modal JS helpers
-    function showClarifyModal(candidates, question) {
-        let modal = document.getElementById('clarifyModal');
-        if (!modal) return;
-        const list = modal.querySelector('.clarify-candidates');
-        const info = modal.querySelector('.clarify-info');
-        list.innerHTML = '';
-        info.textContent = 'We found multiple candidate tables related to your question. Select one or more and click Confirm.';
-        if (!Array.isArray(candidates) || candidates.length === 0) {
-            info.textContent = 'No candidate tables found.';
         }
 
-        // Add checkbox list
-        const form = document.createElement('div');
-        form.className = 'clarify-checkboxes';
-        (candidates || []).slice(0, 20).forEach((c, idx) => {
-            const id = `clarify_cb_${idx}`;
-            const wrapper = document.createElement('div');
-            wrapper.className = 'form-check';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.className = 'form-check-input';
-            cb.id = id;
-            cb.value = c;
-            const lbl = document.createElement('label');
-            lbl.className = 'form-check-label';
-            lbl.htmlFor = id;
-            lbl.textContent = c;
-            wrapper.appendChild(cb);
-            wrapper.appendChild(lbl);
-            form.appendChild(wrapper);
-        });
-        list.appendChild(form);
+        // Modal helper to show full row data
+        function showRowModal(rowObj, tableName) {
+            // Create modal content
+            const modalTitle = document.getElementById('dbRowModalTitle');
+            const modalBody = document.getElementById('dbRowModalBody');
+            modalTitle.textContent = `Table: ${tableName}`;
+            modalBody.innerHTML = '';
 
-        // Controls: Select all, Clear, Confirm, Use none
-        const controls = document.createElement('div');
-        controls.style.marginTop = '10px';
-
-        const selectAllBtn = document.createElement('button');
-        selectAllBtn.className = 'btn btn-sm btn-outline-secondary m-1';
-        selectAllBtn.textContent = 'Select all';
-        selectAllBtn.addEventListener('click', () => {
-            form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
-        });
-
-        const clearBtn = document.createElement('button');
-        clearBtn.className = 'btn btn-sm btn-outline-secondary m-1';
-        clearBtn.textContent = 'Clear';
-        clearBtn.addEventListener('click', () => {
-            form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
-        });
-
-        const confirmBtn = document.createElement('button');
-        confirmBtn.className = 'btn btn-sm btn-primary m-1';
-        confirmBtn.textContent = 'Confirm';
-        confirmBtn.addEventListener('click', async () => {
-            const selected = Array.from(form.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
-            hideClarifyModal();
-            await submitWithSelection(question, selected);
-        });
-
-        const useNone = document.createElement('button');
-        useNone.className = 'btn btn-sm btn-secondary m-1';
-        useNone.textContent = 'None of the above';
-        useNone.addEventListener('click', async () => {
-            hideClarifyModal();
-            await submitWithSelection(question, []);
-        });
-
-        controls.appendChild(selectAllBtn);
-        controls.appendChild(clearBtn);
-        controls.appendChild(confirmBtn);
-        controls.appendChild(useNone);
-
-        list.appendChild(controls);
-
-        modal.style.display = 'flex';
-    }
-
-    function hideClarifyModal() {
-        const modal = document.getElementById('clarifyModal');
-        if (modal) modal.style.display = 'none';
-    }
-
-    async function submitWithSelection(question, selected_tables) {
-        try {
-            // mimic the original submit flow but include selected_tables
-            const button = document.getElementById('submitBtn');
-            const originalText = button.innerHTML;
-            button.disabled = true;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-
-            const response = await fetch('/api/query', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question, conversation: window.chatHistory.slice(-50), selected_tables: selected_tables })
+            const tbl = document.createElement('table');
+            tbl.className = 'table table-sm table-striped';
+            const tb = document.createElement('tbody');
+            Object.keys(rowObj).forEach(k => {
+                const tr = document.createElement('tr');
+                const th = document.createElement('th');
+                th.style.width = '30%';
+                th.textContent = k;
+                const td = document.createElement('td');
+                td.textContent = rowObj[k] === null ? '' : String(rowObj[k]);
+                tr.appendChild(th);
+                tr.appendChild(td);
+                tb.appendChild(tr);
             });
-            const data = await response.json();
-            window.latestPreview = data;
+            tbl.appendChild(tb);
+            modalBody.appendChild(tbl);
 
-            // Render assistant message and SQL as usual
-            if (data.type === 'clarify') {
-                // if backend still wants clarification, show modal again using provided candidates
-                showClarifyModal(data.candidates || [], question);
-            } else {
-                // append assistant text
-                const assistantText = data.explanation || data.response || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
-                try { appendChat('assistant', assistantText); } catch (e) { }
-                if (data.sql && typeof data.sql === 'string') document.getElementById('sqlEditor').value = data.sql;
+            // Show bootstrap modal
+            try {
+                const modalEl = document.getElementById('dbRowModal');
+                const bsModal = new bootstrap.Modal(modalEl);
+                bsModal.show();
+            } catch (e) {
+                // Fallback: show JSON in a readable SweetAlert modal
+                try {
+                    Swal.fire({
+                        title: 'Row data',
+                        html: `<pre style="text-align:left;max-height:400px;overflow:auto">${escapeHtml(JSON.stringify(rowObj, null, 2))}</pre>`,
+                        width: '80rem',
+                        confirmButtonText: 'Close'
+                    });
+                } catch (sErr) {
+                    // Last resort: console output
+                    console.log(JSON.stringify(rowObj, null, 2));
+                }
+            }
+        }
+
+        // Clarifier modal JS helpers
+        function showClarifyModal(candidates, question) {
+            let modal = document.getElementById('clarifyModal');
+            if (!modal) return;
+            const list = modal.querySelector('.clarify-candidates');
+            const info = modal.querySelector('.clarify-info');
+            list.innerHTML = '';
+            info.textContent = 'We found multiple candidate tables related to your question. Select one or more and click Confirm.';
+            if (!Array.isArray(candidates) || candidates.length === 0) {
+                info.textContent = 'No candidate tables found.';
             }
 
-            button.disabled = false;
-            button.innerHTML = originalText;
-        } catch (e) {
-            console.error(e);
-            hideClarifyModal();
-            try { displayError('Failed to submit selection'); } catch (e2) { }
-        }
-    }
-
-    // Visualization helpers: dynamic chart rendering, export to Word, compressed summary
-    function getCurrentResultData() {
-        // Prefer executed results, then sample rows, then latest preview results
-        const lp = window.latestPreview || {};
-        const candidate = lp.results || lp.sample_rows || lp.data || lp.presentation || null;
-        if (!candidate) return null;
-        // normalize to array of objects
-        if (Array.isArray(candidate)) return candidate;
-        // if in presentation format with table.headers and rows
-        if (candidate.table && candidate.table.rows) {
-            const headers = candidate.table.headers || [];
-            return candidate.table.rows.map(r => {
-                const obj = {};
-                headers.forEach((h, i) => obj[h] = r[i]);
-                return obj;
+            // Add checkbox list
+            const form = document.createElement('div');
+            form.className = 'clarify-checkboxes';
+            (candidates || []).slice(0, 20).forEach((c, idx) => {
+                const id = `clarify_cb_${idx}`;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'form-check';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'form-check-input';
+                cb.id = id;
+                cb.value = c;
+                const lbl = document.createElement('label');
+                lbl.className = 'form-check-label';
+                lbl.htmlFor = id;
+                lbl.textContent = c;
+                wrapper.appendChild(cb);
+                wrapper.appendChild(lbl);
+                form.appendChild(wrapper);
             });
+            list.appendChild(form);
+
+            // Controls: Select all, Clear, Confirm, Use none
+            const controls = document.createElement('div');
+            controls.style.marginTop = '10px';
+
+            const selectAllBtn = document.createElement('button');
+            selectAllBtn.className = 'btn btn-sm btn-outline-secondary m-1';
+            selectAllBtn.textContent = 'Select all';
+            selectAllBtn.addEventListener('click', () => {
+                form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
+            });
+
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'btn btn-sm btn-outline-secondary m-1';
+            clearBtn.textContent = 'Clear';
+            clearBtn.addEventListener('click', () => {
+                form.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+            });
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.className = 'btn btn-sm btn-primary m-1';
+            confirmBtn.textContent = 'Confirm';
+            confirmBtn.addEventListener('click', async () => {
+                const selected = Array.from(form.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+                hideClarifyModal();
+                await submitWithSelection(question, selected);
+            });
+
+            const useNone = document.createElement('button');
+            useNone.className = 'btn btn-sm btn-secondary m-1';
+            useNone.textContent = 'None of the above';
+            useNone.addEventListener('click', async () => {
+                hideClarifyModal();
+                await submitWithSelection(question, []);
+            });
+
+            controls.appendChild(selectAllBtn);
+            controls.appendChild(clearBtn);
+            controls.appendChild(confirmBtn);
+            controls.appendChild(useNone);
+
+            list.appendChild(controls);
+
+            modal.style.display = 'flex';
         }
-        return null;
-    }
 
-    function inferColumnsForChart(rows) {
-        if (!rows || !rows.length) return null;
-        const keys = Object.keys(rows[0]);
-        // find first string-like and first numeric-like column
-        let labelKey = null, valueKey = null;
-        for (const k of keys) {
-            const v = rows[0][k];
-            if (labelKey === null && typeof v === 'string') labelKey = k;
-            if (valueKey === null && (typeof v === 'number' || (!isNaN(parseFloat(v)) && isFinite(v)))) valueKey = k;
-            if (labelKey && valueKey) break;
+        function hideClarifyModal() {
+            const modal = document.getElementById('clarifyModal');
+            if (modal) modal.style.display = 'none';
         }
-        // fallback: use first two columns
-        if (!labelKey && keys.length) labelKey = keys[0];
-        if (!valueKey && keys.length > 1) valueKey = keys[1];
-        return { labelKey, valueKey };
-    }
 
-    function renderChartFromRows(chartType) {
-        const rows = getCurrentResultData();
-        if (!rows || rows.length === 0) { alert('No result rows available to chart. Run the query first.'); return; }
-        const cols = inferColumnsForChart(rows);
-        if (!cols || !cols.labelKey || !cols.valueKey) { alert('Could not infer columns for chart.'); return; }
+        async function submitWithSelection(question, selected_tables) {
+            try {
+                // mimic the original submit flow but include selected_tables
+                const button = document.getElementById('submitBtn');
+                const originalText = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
-        const labels = rows.map(r => r[cols.labelKey]);
-        const values = rows.map(r => Number(r[cols.valueKey]) || 0);
+                const model = await resolveSelectedLLM();
+                const data = await fetchJson('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question, conversation: window.chatHistory.slice(-50), selected_tables: selected_tables, llm: model, stick_with_model: true })
+                });
+                window.latestPreview = data;
 
-        const container = document.getElementById('result');
-        container.innerHTML = '';
-        const canvas = document.createElement('canvas');
-        canvas.id = 'visualizationCanvas';
-        canvas.style.maxHeight = '400px';
-        container.appendChild(canvas);
+                // Render assistant message and SQL as usual
+                if (data.type === 'clarify') {
+                    // if backend still wants clarification, show modal again using provided candidates
+                    showClarifyModal(data.candidates || [], question);
+                } else {
+                    // append assistant text
+                    const assistantText = data.explanation || data.response || (data.type === 'query_result' ? 'Query executed.' : 'Result:');
+                    try { appendChat('assistant', assistantText); } catch (e) { }
+                    if (data.sql && typeof data.sql === 'string') document.getElementById('sqlEditor').value = data.sql;
+                }
 
-        try {
-            const ctx = canvas.getContext('2d');
-            // destroy existing chart if present
-            if (window._intel_chart_instance) { try { window._intel_chart_instance.destroy(); } catch (e) { } }
-            const cfg = {
-                type: chartType === 'area' ? 'line' : chartType,
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: cols.valueKey,
-                        data: values,
-                        backgroundColor: chartType === 'pie' ? labels.map((_, i) => `hsl(${(i * 40) % 360} 60% 60%)`) : 'rgba(54,162,235,0.4)',
-                        borderColor: 'rgba(54,162,235,1)',
-                        fill: chartType === 'area'
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            };
-            window._intel_chart_instance = new Chart(ctx, cfg);
-        } catch (e) { console.error('Chart render error', e); alert('Failed to render chart.'); }
-    }
+                button.disabled = false;
+                button.innerHTML = originalText;
+            } catch (e) {
+                console.error(e);
+                hideClarifyModal();
+                try { displayError('Failed to submit selection'); } catch (e2) { }
+            }
+        }
 
-    // Show or hide visualization controls based on the returned data and prompt.
-    function updateVizControlsVisibility(data) {
-        try {
-            const controls = document.getElementById('chartControls');
-            const chartSelect = document.getElementById('chartTypeSelect');
+        // Visualization helpers: dynamic chart rendering, export to Word, compressed summary
+        function getCurrentResultData() {
+            // Prefer executed results, then sample rows, then latest preview results
+            const lp = window.latestPreview || {};
+            const candidate = lp.results || lp.sample_rows || lp.data || lp.presentation || null;
+            if (!candidate) return null;
+            // normalize to array of objects
+            if (Array.isArray(candidate)) return candidate;
+            // if in presentation format with table.headers and rows
+            if (candidate.table && candidate.table.rows) {
+                const headers = candidate.table.headers || [];
+                return candidate.table.rows.map(r => {
+                    const obj = {};
+                    headers.forEach((h, i) => obj[h] = r[i]);
+                    return obj;
+                });
+            }
+            return null;
+        }
+
+        function inferColumnsForChart(rows) {
+            if (!rows || !rows.length) return null;
+            const keys = Object.keys(rows[0]);
+            // find first string-like and first numeric-like column
+            let labelKey = null, valueKey = null;
+            for (const k of keys) {
+                const v = rows[0][k];
+                if (labelKey === null && typeof v === 'string') labelKey = k;
+                if (valueKey === null && (typeof v === 'number' || (!isNaN(parseFloat(v)) && isFinite(v)))) valueKey = k;
+                if (labelKey && valueKey) break;
+            }
+            // fallback: use first two columns
+            if (!labelKey && keys.length) labelKey = keys[0];
+            if (!valueKey && keys.length > 1) valueKey = keys[1];
+            return { labelKey, valueKey };
+        }
+
+        function renderChartFromRows(chartType) {
+            const rows = getCurrentResultData();
+            if (!rows || rows.length === 0) { Swal.fire({ icon: 'warning', title: 'No rows', text: 'No result rows available to chart. Run the query first.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false }); return; }
+            const cols = inferColumnsForChart(rows);
+            if (!cols || !cols.labelKey || !cols.valueKey) { Swal.fire({ icon: 'warning', title: 'Could not infer columns', text: 'Could not infer columns for chart.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false }); return; }
+
+            const labels = rows.map(r => r[cols.labelKey]);
+            const values = rows.map(r => Number(r[cols.valueKey]) || 0);
+
+            const container = document.getElementById('result');
+            container.innerHTML = '';
+            const canvas = document.createElement('canvas');
+            canvas.id = 'visualizationCanvas';
+            canvas.style.maxHeight = '400px';
+            container.appendChild(canvas);
+
+            try {
+                const ctx = canvas.getContext('2d');
+                // destroy existing chart if present
+                if (window._intel_chart_instance) { try { window._intel_chart_instance.destroy(); } catch (e) { } }
+                const cfg = {
+                    type: chartType === 'area' ? 'line' : chartType,
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: cols.valueKey,
+                            data: values,
+                            backgroundColor: chartType === 'pie' ? labels.map((_, i) => `hsl(${(i * 40) % 360} 60% 60%)`) : 'rgba(54,162,235,0.4)',
+                            borderColor: 'rgba(54,162,235,1)',
+                            fill: chartType === 'area'
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                };
+                window._intel_chart_instance = new Chart(ctx, cfg);
+            } catch (e) { console.error('Chart render error', e); Swal.fire({ icon: 'error', title: 'Chart error', text: 'Failed to render chart.' }); }
+        }
+
+        // Show or hide visualization controls based on the returned data and prompt.
+        function updateVizControlsVisibility(data) {
+            try {
+                const controls = document.getElementById('chartControls');
+                const chartSelect = document.getElementById('chartTypeSelect');
+                const showChartBtn = document.getElementById('showChartBtn');
+                const exportWordBtn = document.getElementById('exportWordBtn');
+                const compressSummaryBtn = document.getElementById('compressSummaryBtn');
+
+                const lp = data || window.latestPreview || {};
+                // Determine if there are tabular rows available
+                let hasRows = false;
+                if (Array.isArray(lp.results) && lp.results.length > 0) hasRows = true;
+                if (lp.data && lp.data.table && Array.isArray(lp.data.table.rows) && lp.data.table.rows.length > 0) hasRows = true;
+                if (Array.isArray(lp) && lp.length > 0) hasRows = true;
+                if (lp.presentation && lp.presentation.table && Array.isArray(lp.presentation.table.rows) && lp.presentation.table.rows.length > 0) hasRows = true;
+
+                // Determine if a chart was requested or is appropriate
+                let wantsChart = false;
+                if (lp.formatted && typeof lp.formatted === 'object') {
+                    const fmt = (lp.formatted.format || '').toString().toLowerCase();
+                    if (fmt === 'chart' || fmt === 'plot') wantsChart = true;
+                    // formatted.content could be a chart descriptor
+                    if (lp.formatted.content && lp.formatted.content.type === 'chart') wantsChart = true;
+                }
+                if (lp.visualization && (lp.visualization.chart || lp.visualization.chart_type)) wantsChart = true;
+
+                // Heuristic: inspect the user prompt for chart/plot keywords when rows exist
+                const promptText = (document.getElementById('commandInput')?.value || '') || (lp.question || lp.command || '');
+                if (!wantsChart && hasRows && /\b(chart|plot|bar|pie|line|area|histogram|visualiz)/i.test(promptText)) wantsChart = true;
+
+                const showControls = hasRows && (wantsChart || lp.type === 'query_result');
+
+                if (controls) controls.style.display = showControls ? 'block' : 'none';
+                if (chartSelect) chartSelect.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
+                if (showChartBtn) showChartBtn.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
+                if (exportWordBtn) exportWordBtn.style.display = hasRows ? 'inline-block' : 'none';
+                if (compressSummaryBtn) compressSummaryBtn.style.display = !!lp && lp.type !== 'action_completed' ? 'inline-block' : 'none';
+
+                // If controls are shown and a chart is preferred, auto-render a preview chart
+                if (showControls && wantsChart) {
+                    // delay slightly to allow DOM to update
+                    setTimeout(() => {
+                        const t = (document.getElementById('chartTypeSelect')?.value) || 'bar';
+                        try { renderChartFromRows(t); } catch (e) { /* ignore */ }
+                    }, 50);
+                }
+
+            } catch (e) { console.warn('updateVizControlsVisibility error', e); }
+        }
+
+        async function exportToWord() {
+            const rows = getCurrentResultData();
+            if (!rows || rows.length === 0) { Swal.fire({ icon: 'warning', title: 'No result rows', text: 'Run a query or select a result first.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false }); return; }
+            const headers = Object.keys(rows[0]);
+            const payload = { title: (document.getElementById('commandInput')?.value || 'Export').slice(0, 60), summary: '', table: { headers: headers, rows: rows.map(r => headers.map(h => r[h])) } };
+            try {
+                const resp = await fetch('/api/presentation/word', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!resp.ok) {
+                    const txt = await resp.text(); throw new Error(txt || resp.statusText);
+                }
+                const blob = await resp.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = (payload.title || 'export') + '.docx'; document.body.appendChild(a); a.click(); a.remove();
+                window.URL.revokeObjectURL(url);
+            } catch (e) { console.error('Export error', e); Swal.fire({ icon: 'error', title: 'Export failed', text: 'Failed to export to Word: ' + (e.message || String(e)) }); }
+        }
+
+        async function requestCompressedSummary() {
+            const q = (document.getElementById('commandInput')?.value || '') || (window.chatHistory && window.chatHistory.slice(-1)[0] && window.chatHistory.slice(-1)[0].text) || '';
+            if (!q) { Swal.fire({ icon: 'warning', title: 'No question', text: 'There is nothing to summarize in context.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false }); return; }
+            try {
+                const data = await fetchJson('/api/rag/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) });
+                const sum = data.summary || data.error || 'No summary returned.';
+                appendChat('assistant', sum);
+            } catch (e) { console.error('Summary error', e); Swal.fire({ icon: 'error', title: 'Summary failed', text: e.payload?.error || e.message || 'Failed to get compressed summary.' }); }
+        }
+
+        // Wire up new control buttons
+        document.addEventListener('DOMContentLoaded', () => {
             const showChartBtn = document.getElementById('showChartBtn');
             const exportWordBtn = document.getElementById('exportWordBtn');
             const compressSummaryBtn = document.getElementById('compressSummaryBtn');
-
-            const lp = data || window.latestPreview || {};
-            // Determine if there are tabular rows available
-            let hasRows = false;
-            if (Array.isArray(lp.results) && lp.results.length > 0) hasRows = true;
-            if (lp.data && lp.data.table && Array.isArray(lp.data.table.rows) && lp.data.table.rows.length > 0) hasRows = true;
-            if (Array.isArray(lp) && lp.length > 0) hasRows = true;
-            if (lp.presentation && lp.presentation.table && Array.isArray(lp.presentation.table.rows) && lp.presentation.table.rows.length > 0) hasRows = true;
-
-            // Determine if a chart was requested or is appropriate
-            let wantsChart = false;
-            if (lp.formatted && typeof lp.formatted === 'object') {
-                const fmt = (lp.formatted.format || '').toString().toLowerCase();
-                if (fmt === 'chart' || fmt === 'plot') wantsChart = true;
-                // formatted.content could be a chart descriptor
-                if (lp.formatted.content && lp.formatted.content.type === 'chart') wantsChart = true;
-            }
-            if (lp.visualization && (lp.visualization.chart || lp.visualization.chart_type)) wantsChart = true;
-
-            // Heuristic: inspect the user prompt for chart/plot keywords when rows exist
-            const promptText = (document.getElementById('commandInput')?.value || '') || (lp.question || lp.command || '');
-            if (!wantsChart && hasRows && /\b(chart|plot|bar|pie|line|area|histogram|visualiz)/i.test(promptText)) wantsChart = true;
-
-            const showControls = hasRows && (wantsChart || lp.type === 'query_result');
-
-            if (controls) controls.style.display = showControls ? 'block' : 'none';
-            if (chartSelect) chartSelect.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
-            if (showChartBtn) showChartBtn.style.display = (showControls && wantsChart) ? 'inline-block' : 'none';
-            if (exportWordBtn) exportWordBtn.style.display = hasRows ? 'inline-block' : 'none';
-            if (compressSummaryBtn) compressSummaryBtn.style.display = !!lp && lp.type !== 'action_completed' ? 'inline-block' : 'none';
-
-            // If controls are shown and a chart is preferred, auto-render a preview chart
-            if (showControls && wantsChart) {
-                // delay slightly to allow DOM to update
-                setTimeout(() => {
-                    const t = (document.getElementById('chartTypeSelect')?.value) || 'bar';
-                    try { renderChartFromRows(t); } catch (e) { /* ignore */ }
-                }, 50);
-            }
-
-        } catch (e) { console.warn('updateVizControlsVisibility error', e); }
-    }
-
-    async function exportToWord() {
-        const rows = getCurrentResultData();
-        if (!rows || rows.length === 0) { alert('No result rows available to export.'); return; }
-        const headers = Object.keys(rows[0]);
-        const payload = { title: (document.getElementById('commandInput')?.value || 'Export').slice(0, 60), summary: '', table: { headers: headers, rows: rows.map(r => headers.map(h => r[h])) } };
-        try {
-            const resp = await fetch('/api/presentation/word', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (!resp.ok) {
-                const txt = await resp.text(); throw new Error(txt || resp.statusText);
-            }
-            const blob = await resp.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = (payload.title || 'export') + '.docx'; document.body.appendChild(a); a.click(); a.remove();
-            window.URL.revokeObjectURL(url);
-        } catch (e) { console.error('Export error', e); alert('Failed to export to Word: ' + e.message); }
-    }
-
-    async function requestCompressedSummary() {
-        const q = (document.getElementById('commandInput')?.value || '') || (window.chatHistory && window.chatHistory.slice(-1)[0] && window.chatHistory.slice(-1)[0].text) || '';
-        if (!q) { alert('No question in context to summarize.'); return; }
-        try {
-            const resp = await fetch('/api/rag/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) });
-            if (!resp.ok) { const txt = await resp.text(); throw new Error(txt || resp.statusText); }
-            const data = await resp.json();
-            const sum = data.summary || data.error || 'No summary returned.';
-            appendChat('assistant', sum);
-        } catch (e) { console.error('Summary error', e); alert('Failed to get compressed summary.'); }
-    }
-
-    // Wire up new control buttons
-    document.addEventListener('DOMContentLoaded', () => {
-        const showChartBtn = document.getElementById('showChartBtn');
-        const exportWordBtn = document.getElementById('exportWordBtn');
-        const compressSummaryBtn = document.getElementById('compressSummaryBtn');
-        if (showChartBtn) showChartBtn.addEventListener('click', () => {
-            const t = document.getElementById('chartTypeSelect')?.value || 'bar'; renderChartFromRows(t);
-        });
-        if (exportWordBtn) exportWordBtn.addEventListener('click', exportToWord);
-        if (compressSummaryBtn) compressSummaryBtn.addEventListener('click', requestCompressedSummary);
-        // re-render chart on chart type change if chart already displayed
-        const chartSelect = document.getElementById('chartTypeSelect');
-        if (chartSelect) {
-            chartSelect.addEventListener('change', () => {
-                if (window._intel_chart_instance) {
-                    const t = chartSelect.value || 'bar';
-                    renderChartFromRows(t);
-                }
+            if (showChartBtn) showChartBtn.addEventListener('click', () => {
+                const t = document.getElementById('chartTypeSelect')?.value || 'bar'; renderChartFromRows(t);
             });
-        }
-    });
+            // We no longer show manual "Show Chart" button - auto-rendering follows presentation hints.
+            if (showChartBtn) {
+                try { showChartBtn.style.display = 'none'; showChartBtn.onclick = null; } catch (e) { }
+            }
+            if (exportWordBtn) exportWordBtn.addEventListener('click', exportToWord);
+            if (compressSummaryBtn) compressSummaryBtn.addEventListener('click', requestCompressedSummary);
+            // re-render chart on chart type change if chart already displayed
+            const chartSelect = document.getElementById('chartTypeSelect');
+            if (chartSelect) {
+                chartSelect.addEventListener('change', () => {
+                    if (window._intel_chart_instance) {
+                        const t = chartSelect.value || 'bar';
+                        renderChartFromRows(t);
+                    }
+                });
+            }
+        });
 </script>
+
 {% endblock %}

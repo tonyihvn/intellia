@@ -499,9 +499,16 @@ def handle_examples():
         if not new_example:
             return jsonify({'error': 'example is required'}), 400
 
-        # Persist into vector store
+        # Persist into vector store with optional metadata (featured / auto_run)
         try:
-            success = rag_manager.add_examples([{'text': new_example, 'metadata': {'source': 'examples'}}])
+            featured = bool(data.get('featured', False))
+            auto_run = bool(data.get('auto_run', False))
+            metadata = {'source': 'examples'}
+            if featured:
+                metadata['featured'] = True
+            if auto_run:
+                metadata['auto_run'] = True
+            success = rag_manager.add_examples([{'text': new_example, 'metadata': metadata}])
             if success:
                 return jsonify({'success': True})
             return jsonify({'error': 'Failed to persist example'}), 500
