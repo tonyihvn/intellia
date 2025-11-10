@@ -1,12 +1,22 @@
 [
   {
-    "id": "f1dfecc4-9da0-4147-9ca9-c8f27fd72953",
-    "timestamp": "2025-11-10T13:07:35.612717",
-    "command": "Display records of all the clients who has no phone number",
+    "id": "bea664ea-793b-4744-8cea-8b5ca4bdc43b",
+    "timestamp": "2025-11-10T15:43:01.960340",
+    "command": "Display a list of the customers who have email address",
+    "type": "chat_response",
+    "sql": null,
+    "explanation": "SELECT * FROM customers WHERE email IS NOT NULL;",
+    "status": "success",
+    "error": ""
+  },
+  {
+    "id": "04f77a8c-5bbe-45cd-b510-d21811eb7f50",
+    "timestamp": "2025-11-10T15:41:14.743733",
+    "command": "Send a mail to last client with enail telling him to come now",
     "type": "query_preview",
-    "sql": "SELECT * FROM `users` WHERE phone_number IS NULL;",
+    "sql": null,
     "explanation": "",
-    "status": "preview",
-    "error": null
+    "status": "error",
+    "error": "SQL validation failed: {'ok': False, 'found': ['users', 'vehicles', 'in', 'because', 'customers', 'transactions', 'the'], 'tables': ['accountheads', 'attendances', 'contacts', 'controls', 'deliveries', 'diagnosis', 'expenditure', 'failed_jobs', 'jobs', 'migrations', 'parts', 'partsorders', 'password_resets', 'payments', 'personal_access_tokens', 'personnels', 'psfus', 'sales', 'serviceorders', 'settings', 'stocks', 'supplies', 'tasks', 'transactions', 'users', 'vehicles'], 'missing_tables': ['because', 'customers', 'e', 'lacservices'], 'missing_columns': [{'table': 'vehicles', 'column': 'registration_number'}, {'table': 'transactions', 'column': 'vehicle_id'}, {'table': 'customers', 'column': 'id'}, {'table': 'transactions', 'column': 'customer_id'}, {'table': 'customers', 'column': 'user_id'}]}"
   }
 ]
